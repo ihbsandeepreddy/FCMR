@@ -1,0 +1,88 @@
+"""Load and apply column-mapping YAMLs to normalise uploaded CSV headers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from fcmr_core.config import settings
+
+_REGISTRY: dict[str, "SchemaMap"] = {}
+
+
+@dataclass
+class ColumnSpec:
+    canonical: str
+    aliases: list[str]
+    required: bool
+    dtype: str
+
+
+@dataclass
+class SchemaMap:
+    report_type: str
+    columns: list[ColumnSpec]
+    # alias (lower) -> canonical
+    _index: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        for col in self.columns:
+            for alias in col.aliases:
+                self._index[alias.lower().strip()] = col.canonical
+
+    def map_headers(self, raw_headers: list[str]) -> dict[str, str]:
+        """Return {raw_header: canonical_name} for every recognised column."""
+        mapping: dict[str, str] = {}
+        for h in raw_headers:
+            canonical = self._index.get(h.lower().strip())
+            if canonical:
+                mapping[h] = canonical
+        return mapping
+
+    def missing_required(self, mapped: dict[str, str]) -> list[str]:
+        found_canonicals = set(mapped.values())
+        return [c.canonical for c in self.columns if c.required and c.canonical not in found_canonicals]
+
+    def dtype_for(self, canonical: str) -> str:
+        for col in self.columns:
+            if col.canonical == canonical:
+                return col.dtype
+        return "str"
+
+
+def _load_yaml(path: Path) -> SchemaMap:
+    with path.open("r", encoding="utf-8") as f:
+        raw: dict[str, Any] = yaml.safe_load(f)
+    cols = []
+    for canonical, spec in raw.get("columns", {}).items():
+        cols.append(
+            ColumnSpec(
+                canonical=canonical,
+                aliases=spec.get("aliases", [canonical]),
+                required=spec.get("required", False),
+                dtype=spec.get("dtype", "str"),
+            )
+        )
+    return SchemaMap(report_type=raw["report_type"], columns=cols)
+
+
+def get_schema(report_type: str) -> SchemaMap | None:
+    if not _REGISTRY:
+        _reload()
+    return _REGISTRY.get(report_type)
+
+
+def available_report_types() -> list[str]:
+    if not _REGISTRY:
+        _reload()
+    return sorted(_REGISTRY.keys())
+
+
+def _reload() -> None:
+    _REGISTRY.clear()
+    for yaml_file in settings.schemas_dir.glob("*.yaml"):
+        schema = _load_yaml(yaml_file)
+        _REGISTRY[schema.report_type] = schema

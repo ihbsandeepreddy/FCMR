@@ -1,0 +1,47 @@
+report_type: lms
+
+columns:
+  loan_account_no:
+    aliases: [loan_account_no, lan, loan_account, loan_id, loanid, account_no]
+    required: true
+    dtype: str
+
+  customer_id:
+    aliases: [customer_id, cust_id, borrower_id, client_id]
+    required: false
+    dtype: str
+
+  disbursement_date:
+    aliases: [disbursement_date, disbursal_date, disb_date, disbursed_on]
+    required: false
+    dtype: str
+
+  loan_amount:
+    aliases: [loan_amount, sanctioned_amount, principal, loan_amt]
+    required: false
+    dtype: float
+
+  outstanding_principal:
+    aliases: [outstanding_principal, outstanding, outstanding_amt, principal_outstanding]
+    required: false
+    dtype: float
+
+  emi_amount:
+    aliases: [emi_amount, emi, installment_amount]
+    required: false
+    dtype: float
+
+  loan_status:
+    aliases: [loan_status, status, account_status]
+    required: false
+    dtype: str
+
+  product_type:
+    aliases: [product_type, product, loan_type, scheme]
+    required: false
+    dtype: str
+
+  branch:
+    aliases: [branch, branch_name, branch_code]
+    required: false
+    dtype: str
