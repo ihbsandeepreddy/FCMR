@@ -17,14 +17,46 @@
     <dt>Upload ID</dt><dd class="mono">{{ upload.upload_id }}</dd>
   </dl>
 
-  {% if upload.status == "ready" %}
   <div class="card-actions">
+    {% if upload.status == "mapping_pending" %}
+    <a href="/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-primary">
+      Map Columns →
+    </a>
+    <p class="help-text" style="margin-top:8px">
+      Column mapping is required before analytics can run.
+    </p>
+    {% elif upload.status == "ready" %}
     <form method="POST" action="/uploads/{{ upload.upload_id }}/run">
-      <button type="submit" class="btn btn-primary btn-run">▶ Run Analytics Now</button>
+      <button type="submit" class="btn btn-primary btn-run">▶ Run Analytics</button>
     </form>
+    {% elif upload.status == "failed" %}
+    <p class="error-text">Ingestion failed. Please re-upload the file.</p>
+    {% endif %}
   </div>
-  {% endif %}
 </section>
+
+{% if mapping_display %}
+<section class="card">
+  <h2>Active Column Mapping</h2>
+  <p class="help-text" style="margin-bottom:12px">
+    These are the mappings confirmed during ingestion.
+    <a href="/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-sm btn-ghost" style="margin-left:8px">Edit &amp; Re-ingest</a>
+  </p>
+  <table class="data-table" style="max-width:640px">
+    <thead>
+      <tr><th>CSV Column</th><th>Canonical Field</th></tr>
+    </thead>
+    <tbody>
+      {% for raw, canonical in mapping_display %}
+      <tr>
+        <td class="mono">{{ raw }}</td>
+        <td class="mono" style="color:var(--clr-ok)">{{ canonical }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
 
 {% if runs %}
 <section class="card">
@@ -58,7 +90,7 @@
     </tbody>
   </table>
 </section>
-{% else %}
+{% elif upload.status == "ready" %}
 <section class="card empty-state">
   <p>No runs yet. Click <strong>Run Analytics</strong> above to start.</p>
 </section>

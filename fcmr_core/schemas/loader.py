@@ -81,6 +81,14 @@ def available_report_types() -> list[str]:
     return sorted(_REGISTRY.keys())
 
 
+def get_canonical_fields(report_type: str) -> list[ColumnSpec]:
+    """Return all canonical column specs for a report type, required ones first."""
+    schema = get_schema(report_type)
+    if not schema:
+        return []
+    return sorted(schema.columns, key=lambda c: (not c.required, c.canonical))
+
+
 def _reload() -> None:
     _REGISTRY.clear()
     for yaml_file in settings.schemas_dir.glob("*.yaml"):

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Map Columns — {{ upload.filename }} — FCMR{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Map Columns</h1>
+  <a href="/" class="btn btn-ghost">← Dashboard</a>
+</div>
+
+<section class="card info-card">
+  <h2>{{ upload.filename }}</h2>
+  <p class="help-text">
+    Map each column from your CSV to the corresponding canonical field.
+    Columns marked <strong>required *</strong> must be mapped for analytics to run correctly.
+    Set unused columns to <em>— Skip —</em>.
+  </p>
+  <p class="help-text" style="margin-top:8px">
+    Report type: <span class="badge badge-type">{{ upload.report_type }}</span>
+    &nbsp;·&nbsp; {{ raw_headers | length }} column(s) detected
+  </p>
+</section>
+
+<form method="POST" action="/uploads/{{ upload.upload_id }}/map-columns">
+  <section class="card">
+    <h2>Column Mapping</h2>
+
+    <table class="data-table map-table">
+      <thead>
+        <tr>
+          <th style="width:35%">Your CSV Column</th>
+          <th style="width:25%">Suggested Mapping</th>
+          <th style="width:40%">Map To (confirm or change)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for header in raw_headers %}
+        {% set idx = loop.index0 %}
+        {% set auto = suggested.get(header, "") %}
+        <tr class="{% if not auto %}row-unmapped{% endif %}">
+          <td><code class="mono">{{ header }}</code></td>
+          <td>
+            {% if auto %}
+              <span class="badge badge-ready">{{ auto }}</span>
+            {% else %}
+              <span class="timestamp">— not recognised —</span>
+            {% endif %}
+          </td>
+          <td>
+            <select name="map_{{ idx }}" class="col-select">
+              <option value="__skip__"{% if not auto %} selected{% endif %}>— Skip —</option>
+              {% if canonical_fields | selectattr("required") | list %}
+              <optgroup label="Required fields">
+                {% for spec in canonical_fields %}{% if spec.required %}
+                <option value="{{ spec.canonical }}"
+                  {% if auto == spec.canonical %} selected{% endif %}>
+                  {{ spec.canonical }} *
+                </option>
+                {% endif %}{% endfor %}
+              </optgroup>
+              {% endif %}
+              <optgroup label="Optional fields">
+                {% for spec in canonical_fields %}{% if not spec.required %}
+                <option value="{{ spec.canonical }}"
+                  {% if auto == spec.canonical %} selected{% endif %}>
+                  {{ spec.canonical }}
+                </option>
+                {% endif %}{% endfor %}
+              </optgroup>
+            </select>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {% set required_fields = canonical_fields | selectattr("required") | list %}
+  {% if required_fields %}
+  <section class="card" style="background:#fffbeb;border-color:#fcd34d;max-width:640px">
+    <h2 style="color:#92400e;font-size:15px">Required fields for analytics</h2>
+    <p class="help-text">These must be mapped or analytics results will show all rows as missing data:</p>
+    <p style="margin-top:8px;font-size:14px">
+      {% for spec in required_fields %}<code class="mono">{{ spec.canonical }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+  </section>
+  {% endif %}
+
+  <div class="form-actions" style="margin-top:4px">
+    <button type="submit" class="btn btn-primary">Confirm Mapping &amp; Ingest →</button>
+    <a href="/" class="btn btn-ghost">Cancel</a>
+  </div>
+</form>
+
+<script>
+  document.querySelectorAll('.col-select').forEach(function(sel) {
+    function update() {
+      var row = sel.closest('tr');
+      row.style.background = (sel.value === '__skip__') ? 'var(--clr-skip-bg)' : '';
+    }
+    sel.addEventListener('change', update);
+    update();
+  });
+</script>
+{% endblock %}

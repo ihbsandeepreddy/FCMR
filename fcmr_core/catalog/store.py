@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,15 +20,29 @@ def init_catalog() -> None:
     with _conn() as con:
         con.execute("""
             CREATE TABLE IF NOT EXISTS uploads (
-                upload_id    TEXT PRIMARY KEY,
-                report_type  TEXT NOT NULL,
-                filename     TEXT NOT NULL,
-                row_count    INTEGER,
-                parquet_path TEXT,
-                status       TEXT NOT NULL DEFAULT 'pending',
-                created_at   TEXT NOT NULL
+                upload_id       TEXT PRIMARY KEY,
+                report_type     TEXT NOT NULL,
+                filename        TEXT NOT NULL,
+                csv_path        TEXT,
+                sniffed_headers TEXT,
+                column_mapping  TEXT,
+                row_count       INTEGER,
+                parquet_path    TEXT,
+                status          TEXT NOT NULL DEFAULT 'mapping_pending',
+                created_at      TEXT NOT NULL
             )
         """)
+        # Migrate existing tables that pre-date the column-mapping feature
+        for col, dtype in [
+            ("csv_path", "TEXT"),
+            ("sniffed_headers", "TEXT"),
+            ("column_mapping", "TEXT"),
+        ]:
+            try:
+                con.execute(f"ALTER TABLE uploads ADD COLUMN {col} {dtype}")
+            except Exception:
+                pass  # Column already exists
+
         con.execute("""
             CREATE TABLE IF NOT EXISTS runs (
                 run_id       TEXT PRIMARY KEY,
@@ -42,24 +57,76 @@ def init_catalog() -> None:
         """)
 
 
+# ---------------------------------------------------------------------------
+# Upload CRUD
+# ---------------------------------------------------------------------------
+
 def create_upload(report_type: str, filename: str) -> str:
     uid = str(uuid.uuid4())
-    now = _now()
     with _conn() as con:
         con.execute(
-            "INSERT INTO uploads VALUES (?, ?, ?, NULL, NULL, 'pending', ?)",
-            [uid, report_type, filename, now],
+            "INSERT INTO uploads (upload_id, report_type, filename, status, created_at) "
+            "VALUES (?, ?, ?, 'mapping_pending', ?)",
+            [uid, report_type, filename, _now()],
         )
     return uid
 
 
-def update_upload(upload_id: str, *, parquet_path: Path, row_count: int) -> None:
+def set_mapping_pending(
+    upload_id: str,
+    *,
+    csv_path: Path,
+    sniffed_headers: list[str],
+) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE uploads SET parquet_path=?, row_count=?, status='ready' WHERE upload_id=?",
-            [str(parquet_path), row_count, upload_id],
+            "UPDATE uploads SET csv_path=?, sniffed_headers=?, status='mapping_pending' WHERE upload_id=?",
+            [str(csv_path), json.dumps(sniffed_headers), upload_id],
         )
 
+
+def set_upload_ready(
+    upload_id: str,
+    *,
+    parquet_path: Path,
+    row_count: int,
+    column_mapping: dict,
+) -> None:
+    with _conn() as con:
+        con.execute(
+            "UPDATE uploads SET parquet_path=?, row_count=?, column_mapping=?, status='ready' "
+            "WHERE upload_id=?",
+            [str(parquet_path), row_count, json.dumps(column_mapping), upload_id],
+        )
+
+
+def set_upload_failed(upload_id: str, *, error: str) -> None:
+    with _conn() as con:
+        con.execute(
+            "UPDATE uploads SET status='failed' WHERE upload_id=?",
+            [upload_id],
+        )
+
+
+def get_upload(upload_id: str) -> dict | None:
+    with _conn() as con:
+        rows = con.execute("SELECT * FROM uploads WHERE upload_id=?", [upload_id]).fetchall()
+        if not rows:
+            return None
+        cols = [d[0] for d in con.description]
+    return dict(zip(cols, rows[0]))
+
+
+def list_uploads() -> list[dict]:
+    with _conn() as con:
+        rows = con.execute("SELECT * FROM uploads ORDER BY created_at DESC").fetchall()
+        cols = [d[0] for d in con.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Run CRUD
+# ---------------------------------------------------------------------------
 
 def create_run(upload_id: str) -> str:
     rid = str(uuid.uuid4())
@@ -79,13 +146,6 @@ def update_run(run_id: str, **kwargs: str | None) -> None:
     sets = ", ".join(f"{k}=?" for k in fields)
     with _conn() as con:
         con.execute(f"UPDATE runs SET {sets} WHERE run_id=?", [*fields.values(), run_id])
-
-
-def list_uploads() -> list[dict]:
-    with _conn() as con:
-        rows = con.execute("SELECT * FROM uploads ORDER BY created_at DESC").fetchall()
-        cols = [d[0] for d in con.description]
-    return [dict(zip(cols, r)) for r in rows]
 
 
 def list_runs(upload_id: str) -> list[dict]:
