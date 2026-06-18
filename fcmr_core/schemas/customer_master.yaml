@@ -5,7 +5,7 @@ report_type: customer_master
 
 columns:
   customer_id:
-    aliases: [customer_id, cust_id, customerid, client_id, borrower_id, loan_account_no, lan]
+    aliases: [customer_id, cust_id, customerid, client_id, borrower_id]
     required: true
     dtype: str
 
@@ -96,5 +96,15 @@ columns:
 
   ifsc:
     aliases: [ifsc, ifsc_code, bank_ifsc]
+    required: false
+    dtype: str
+
+  lan:
+    aliases: [lan, loan_agreement_number, loan_account_no, loan_id, loan_no, account_no_loan]
+    required: true
+    dtype: str
+
+  coapplicant_mobile:
+    aliases: [co_applicant_mobile, coapplicant_phone, coapp_mobile, guarantor_mobile, coapplicant_contact]
     required: false
     dtype: str

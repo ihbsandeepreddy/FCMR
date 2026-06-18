@@ -90,6 +90,20 @@ def init_catalog() -> None:
         except Exception:
             pass  # Column already exists
 
+        # Create mapping_profiles table (Phase 3)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS mapping_profiles (
+                profile_id      TEXT PRIMARY KEY,
+                report_type     TEXT NOT NULL,
+                header_signature TEXT NOT NULL,
+                mapping_json    TEXT NOT NULL,
+                engagement_id   TEXT,
+                created_by      TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                UNIQUE (report_type, header_signature, engagement_id)
+            )
+        """)
+
         # Create a default engagement for existing uploads
         try:
             con.execute("""
@@ -290,6 +304,59 @@ def list_uploads(engagement_id: str | None = None) -> list[dict]:
             ).fetchall()
         else:
             rows = con.execute("SELECT * FROM uploads ORDER BY created_at DESC").fetchall()
+        cols = [d[0] for d in con.description]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def save_mapping_profile(
+    report_type: str,
+    header_signature: str,
+    mapping_json: str,
+    engagement_id: str | None = None,
+    created_by: str = "admin",
+) -> str:
+    """Save a column mapping profile. Returns profile_id."""
+    profile_id = str(uuid.uuid4())
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO mapping_profiles (profile_id, report_type, header_signature, mapping_json, engagement_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [profile_id, report_type, header_signature, mapping_json, engagement_id, created_by, _now()],
+        )
+    return profile_id
+
+
+def find_profile_by_signature(
+    report_type: str,
+    header_signature: str,
+    engagement_id: str | None = None,
+) -> dict | None:
+    """Find a mapping profile by report type and header signature."""
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM mapping_profiles WHERE report_type=? AND header_signature=? AND engagement_id IS ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            [report_type, header_signature, engagement_id],
+        ).fetchall()
+        if not rows:
+            return None
+        cols = [d[0] for d in con.description]
+    return dict(zip(cols, rows[0]))
+
+
+def list_profiles(report_type: str, engagement_id: str | None = None) -> list[dict]:
+    """List mapping profiles for a report type."""
+    with _conn() as con:
+        if engagement_id:
+            rows = con.execute(
+                "SELECT * FROM mapping_profiles WHERE report_type=? AND engagement_id=? ORDER BY created_at DESC",
+                [report_type, engagement_id],
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM mapping_profiles WHERE report_type=? AND engagement_id IS NULL ORDER BY created_at DESC",
+                [report_type],
+            ).fetchall()
         cols = [d[0] for d in con.description]
     return [dict(zip(cols, r)) for r in rows]
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,40 @@ class SchemaMap:
             if canonical:
                 mapping[h] = canonical
         return mapping
+
+    def score_header_match(self, raw_header: str, canonical: str) -> float:
+        """Score a raw header against a canonical field's aliases. Returns [0.0, 1.0]."""
+        for col in self.columns:
+            if col.canonical == canonical:
+                raw_lower = raw_header.lower().strip()
+                best_score = 0.0
+                for alias in col.aliases:
+                    alias_lower = alias.lower().strip()
+                    # Exact match = 1.0
+                    if raw_lower == alias_lower:
+                        return 1.0
+                    # Use SequenceMatcher for fuzzy matching
+                    score = difflib.SequenceMatcher(None, raw_lower, alias_lower).ratio()
+                    best_score = max(best_score, score)
+                return best_score
+        return 0.0
+
+    def map_headers_with_scores(self, raw_headers: list[str]) -> dict[str, tuple[str, float]]:
+        """Return {raw_header: (canonical_name, confidence_score)} for all recognisable columns."""
+        result: dict[str, tuple[str, float]] = {}
+        for h in raw_headers:
+            best_match = None
+            best_score = 0.0
+            # Score against all canonicals
+            for col in self.columns:
+                score = self.score_header_match(h, col.canonical)
+                if score > best_score:
+                    best_score = score
+                    best_match = col.canonical
+            # Only include if score is reasonable (>= 0.7)
+            if best_match and best_score >= 0.7:
+                result[h] = (best_match, round(best_score, 2))
+        return result
 
     def missing_required(self, mapped: dict[str, str]) -> list[str]:
         found_canonicals = set(mapped.values())

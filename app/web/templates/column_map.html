@@ -23,6 +23,12 @@
   </div>
 </div>
 
+{% if profile_applied %}
+<div class="notice" style="margin-bottom:16px; background:var(--ok-bg); border-left:4px solid var(--ok-text);">
+  <strong>✓ Profile applied</strong> — This mapping was auto-detected from a saved profile ({{ profile_id[:8] }})
+</div>
+{% endif %}
+
 {% set required_fields = canonical_fields | selectattr("required") | list %}
 {% if required_fields %}
 <div class="notice notice-warn" style="margin-bottom:16px;">
@@ -47,11 +53,16 @@
         {% for header in raw_headers %}
         {% set idx = loop.index0 %}
         {% set auto = suggested.get(header, "") %}
+        {% set score_data = suggested_with_scores.get(header, ()) %}
+        {% set canonical, score = score_data if score_data else ("", "") %}
         <tr class="map-row{% if not auto %} row-skip{% endif %}" data-idx="{{ idx }}">
           <td><code class="mono">{{ header }}</code></td>
           <td>
             {% if auto %}
               <span class="mono" style="color:var(--ok-text);">{{ auto }}</span>
+              {% if score_data and score %}
+              <div style="font-size:11px; color:var(--muted); margin-top:2px;">{{ (score * 100) | int }}%</div>
+              {% endif %}
             {% else %}
               <span style="color:var(--faint); font-size:12px;">— not recognised —</span>
             {% endif %}

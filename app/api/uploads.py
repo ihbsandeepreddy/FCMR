@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -153,7 +154,33 @@ async def map_columns_form(request: Request, upload_id: str):
     raw_headers: list[str] = json.loads(upload["sniffed_headers"] or "[]")
     schema = get_schema(upload["report_type"])
 
-    suggested: dict[str, str] = schema.map_headers(raw_headers) if schema else {}
+    # Compute header signature for profile lookup
+    header_signature = hashlib.sha256(
+        json.dumps(sorted(raw_headers), sort_keys=True).encode()
+    ).hexdigest()
+
+    # Check for saved profile
+    engagement_id = upload.get("engagement_id")
+    saved_profile = store.find_profile_by_signature(
+        upload["report_type"],
+        header_signature,
+        engagement_id=engagement_id,
+    )
+
+    # If profile found, use it; otherwise compute suggestions with scores
+    profile_applied = False
+    suggested: dict[str, str] = {}
+    suggested_with_scores: dict[str, tuple[str, float]] = {}
+
+    if saved_profile:
+        suggested = json.loads(saved_profile["mapping_json"])
+        profile_applied = True
+    else:
+        if schema:
+            suggested_with_scores = schema.map_headers_with_scores(raw_headers)
+            # Also include exact matches for display
+            suggested = schema.map_headers(raw_headers)
+
     canonical_fields = get_canonical_fields(upload["report_type"])
 
     return templates.TemplateResponse(
@@ -162,7 +189,10 @@ async def map_columns_form(request: Request, upload_id: str):
             "upload": upload,
             "raw_headers": raw_headers,
             "suggested": suggested,
+            "suggested_with_scores": suggested_with_scores,
             "canonical_fields": canonical_fields,
+            "profile_applied": profile_applied,
+            "profile_id": saved_profile.get("profile_id") if saved_profile else None,
         },
     )
 
@@ -194,6 +224,20 @@ async def do_map_columns(request: Request, upload_id: str):
             parquet_path=result.parquet_path,
             row_count=result.total_rows,
             column_mapping=user_mapping,
+        )
+
+        # After successful ingestion, save the mapping as a profile
+        header_signature = hashlib.sha256(
+            json.dumps(sorted(raw_headers), sort_keys=True).encode()
+        ).hexdigest()
+        engagement_id = upload.get("engagement_id")
+        username = request.session.get("username", "admin")
+        store.save_mapping_profile(
+            upload["report_type"],
+            header_signature,
+            json.dumps(user_mapping),
+            engagement_id=engagement_id,
+            created_by=username,
         )
     except Exception as exc:
         store.set_upload_failed(upload_id, error=str(exc))
