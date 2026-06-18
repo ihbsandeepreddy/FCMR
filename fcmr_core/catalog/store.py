@@ -330,11 +330,18 @@ def save_mapping_profile(
             )
         except Exception:
             # Duplicate signature — update the mapping_json in place
-            con.execute(
-                "UPDATE mapping_profiles SET mapping_json=?, created_at=? "
-                "WHERE report_type=? AND header_signature=? AND engagement_id IS ?",
-                [mapping_json, _now(), report_type, header_signature, engagement_id],
-            )
+            if engagement_id is None:
+                con.execute(
+                    "UPDATE mapping_profiles SET mapping_json=?, created_at=? "
+                    "WHERE report_type=? AND header_signature=? AND engagement_id IS NULL",
+                    [mapping_json, _now(), report_type, header_signature],
+                )
+            else:
+                con.execute(
+                    "UPDATE mapping_profiles SET mapping_json=?, created_at=? "
+                    "WHERE report_type=? AND header_signature=? AND engagement_id=?",
+                    [mapping_json, _now(), report_type, header_signature, engagement_id],
+                )
     return profile_id
 
 
@@ -345,11 +352,18 @@ def find_profile_by_signature(
 ) -> dict | None:
     """Find a mapping profile by report type and header signature."""
     with _conn() as con:
-        rows = con.execute(
-            "SELECT * FROM mapping_profiles WHERE report_type=? AND header_signature=? AND engagement_id IS ? "
-            "ORDER BY created_at DESC LIMIT 1",
-            [report_type, header_signature, engagement_id],
-        ).fetchall()
+        if engagement_id is None:
+            rows = con.execute(
+                "SELECT * FROM mapping_profiles WHERE report_type=? AND header_signature=? AND engagement_id IS NULL "
+                "ORDER BY created_at DESC LIMIT 1",
+                [report_type, header_signature],
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT * FROM mapping_profiles WHERE report_type=? AND header_signature=? AND engagement_id=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                [report_type, header_signature, engagement_id],
+            ).fetchall()
         if not rows:
             return None
         cols = [d[0] for d in con.description]

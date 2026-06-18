@@ -70,6 +70,10 @@ async def do_upload(
     # Get engagement_id from session
     engagement_id = request.session.get("engagement_id")
 
+    # Filter out empty UploadFile stubs that browsers send for unselected inputs
+    folder = [f for f in folder if f.filename]
+    files = [f for f in files if f.filename]
+
     # Collect all files to process
     upload_files = folder if folder else files
     if not upload_files:
