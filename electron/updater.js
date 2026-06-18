@@ -5,11 +5,12 @@
  * (ihbsandeepreddy/sangir-releases) and installs them on restart.
  */
 
-const { autoUpdater, app } = require("electron-updater");
-const log = require("electron-log");
-const { getLogger } = require("./logging-bridge");
+const { autoUpdater } = require("electron-updater");
 
-const updateLogger = getLogger("update");
+const updateLogger = {
+  log: (...args) => console.log("[updater]", ...args),
+  error: (...args) => console.error("[updater]", ...args),
+};
 
 /**
  * Initialize the auto-updater.
