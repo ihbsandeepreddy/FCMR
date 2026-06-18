@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -13,6 +17,10 @@ from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import ingest_csv, sniff_headers
 from fcmr_core.schemas.loader import available_report_types, get_canonical_fields, get_schema
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 router = APIRouter()
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
@@ -25,7 +33,9 @@ templates = Jinja2Templates(directory=str(_templates_dir))
 
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    uploads = store.list_uploads()
+    # Scope uploads to active engagement
+    engagement_id = request.session.get("engagement_id")
+    uploads = store.list_uploads(engagement_id=engagement_id) if engagement_id else []
     report_types = available_report_types()
     return templates.TemplateResponse(
         request=request, name="index.html",
@@ -50,25 +60,82 @@ async def upload_form(request: Request):
 async def do_upload(
     request: Request,
     report_type: str = Form(...),
-    file: UploadFile = File(...),
+    folder: list[UploadFile] = File(default=[]),
+    files: list[UploadFile] = File(default=[]),
 ):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are accepted.")
+    import zipfile
+    import tempfile
 
-    content = await file.read()
-    if len(content) > settings.max_upload_bytes:
-        raise HTTPException(status_code=413, detail="File exceeds 2 GB upload limit.")
+    # Get engagement_id from session
+    engagement_id = request.session.get("engagement_id")
 
-    upload_id = store.create_upload(report_type, file.filename)
-    dest_dir = settings.uploads_dir / upload_id
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = dest_dir / file.filename
-    csv_path.write_bytes(content)
+    # Collect all files to process
+    upload_files = folder if folder else files
+    if not upload_files:
+        raise HTTPException(status_code=400, detail="No files provided.")
 
-    headers = sniff_headers(csv_path)
-    store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
+    # Generate one batch_id for this upload request
+    batch_id = str(uuid.uuid4())
+    ingestion_time = _now()
 
-    return RedirectResponse(url=f"/uploads/{upload_id}/map-columns", status_code=303)
+    # Process files from .zip if present
+    temp_dir = None
+    try:
+        processed_files = []
+
+        for file in upload_files:
+            if file.filename and file.filename.lower().endswith(".zip"):
+                # Unzip and extract CSVs
+                content = await file.read()
+                temp_dir = tempfile.TemporaryDirectory()
+                with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                    zf.extractall(temp_dir.name)
+                # Collect all CSVs from unzipped directory
+                for root, dirs, filenames in os.walk(temp_dir.name):
+                    for fname in filenames:
+                        if fname.lower().endswith(".csv"):
+                            full_path = Path(root) / fname
+                            processed_files.append((fname, full_path.read_bytes()))
+            elif file.filename and file.filename.lower().endswith(".csv"):
+                # Regular CSV file
+                content = await file.read()
+                processed_files.append((file.filename, content))
+
+        if not processed_files:
+            raise HTTPException(status_code=400, detail="No CSV files found.")
+
+        # Create upload row for each file
+        created_uploads = []
+        for filename, content in processed_files:
+            if len(content) > settings.max_upload_bytes:
+                raise HTTPException(status_code=413, detail=f"File {filename} exceeds 2 GB limit.")
+
+            # Create upload row with batch_id and engagement_id
+            upload_id = store.create_upload(
+                report_type,
+                filename,
+                batch_id=batch_id,
+                engagement_id=engagement_id,
+            )
+
+            # Store CSV to disk
+            dest_dir = settings.uploads_dir / upload_id
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = dest_dir / filename
+            csv_path.write_bytes(content)
+
+            # Sniff headers and set mapping_pending
+            headers = sniff_headers(csv_path)
+            store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
+
+            created_uploads.append((upload_id, filename))
+
+        # Redirect to dashboard (or could show a batch summary page)
+        return RedirectResponse(url="/dashboard", status_code=303)
+
+    finally:
+        if temp_dir:
+            temp_dir.cleanup()
 
 
 # ---------------------------------------------------------------------------

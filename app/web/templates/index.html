@@ -57,17 +57,22 @@
         <th style="text-align:right">Rows</th>
         <th>Status</th>
         <th>Uploaded</th>
+        <th>Ingested</th>
         <th></th>
       </tr>
     </thead>
     <tbody>
       {% for u in uploads %}
       <tr>
-        <td class="filename">{{ u.filename }}</td>
+        <td class="filename">
+          {% if u.batch_id %}<span style="font-size:11px; color:var(--muted);">{{ u.batch_id[:8] }}</span><br/>{% endif %}
+          {{ u.filename }}
+        </td>
         <td><span class="badge badge-type">{{ u.report_type.replace("_"," ").title() }}</span></td>
         <td class="mono right">{{ "{:,}".format(u.row_count) if u.row_count else "—" }}</td>
         <td><span class="badge badge-{{ u.status }}">{{ u.status.replace("_"," ") }}</span></td>
         <td class="timestamp">{{ u.created_at[:16].replace("T"," ") }}</td>
+        <td class="timestamp">{{ u.ingested_at[:16].replace("T"," ") if u.ingested_at else "—" }}</td>
         <td style="text-align:right; white-space:nowrap;">
           <a href="/uploads/{{ u.upload_id }}" class="btn btn-sm btn-ghost">View</a>
           {% if u.status == "ready" %}

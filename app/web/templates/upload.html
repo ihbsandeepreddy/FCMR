@@ -21,17 +21,32 @@
         <p class="help-text">Select the type of report you are uploading.</p>
       </div>
 
+      <!-- Folder picker -->
       <div class="form-group">
-        <label for="file">CSV File</label>
-        <div class="file-drop" id="file-drop">
-          <input type="file" name="file" id="file" accept=".csv" required />
+        <label for="folder">Upload Folder</label>
+        <div class="file-drop" id="folder-drop">
+          <input type="file" name="folder" id="folder" webkitdirectory multiple />
           <div class="file-drop-label">
-            <span class="file-icon">📄</span>
-            <span style="font-size:13.5px;">Drop CSV here or <strong>click to browse</strong></span>
-            <span class="file-hint">Maximum 2 GB · CSV format only</span>
+            <span class="file-icon">📁</span>
+            <span style="font-size:13.5px;">Drop folder here or <strong>click to browse</strong></span>
+            <span class="file-hint">All CSVs in folder will be uploaded as one batch</span>
           </div>
         </div>
-        <p class="file-selected" id="file-selected"></p>
+        <p class="file-selected" id="folder-selected"></p>
+      </div>
+
+      <!-- Multi-file picker -->
+      <div class="form-group">
+        <label for="files">Or Select Files</label>
+        <div class="file-drop" id="files-drop">
+          <input type="file" name="files" id="files" accept=".csv,.zip" multiple />
+          <div class="file-drop-label">
+            <span class="file-icon">📄</span>
+            <span style="font-size:13.5px;">Drop files here or <strong>click to browse</strong></span>
+            <span class="file-hint">Max 2 GB per file · CSV or ZIP format</span>
+          </div>
+        </div>
+        <p class="file-selected" id="files-selected"></p>
       </div>
 
       <div class="form-actions">
@@ -61,10 +76,39 @@
 </div>
 
 <script>
-  const input = document.getElementById("file");
-  const label = document.getElementById("file-selected");
-  input.addEventListener("change", () => {
-    label.textContent = input.files[0] ? "Selected: " + input.files[0].name : "";
+  function updateFileCount(inputId, labelId) {
+    const input = document.getElementById(inputId);
+    const label = document.getElementById(labelId);
+    if (input.files.length === 0) {
+      label.textContent = "";
+    } else if (input.files.length === 1) {
+      label.textContent = "Selected: " + input.files[0].name;
+    } else {
+      label.textContent = "Selected: " + input.files.length + " files";
+    }
+  }
+
+  document.getElementById("folder").addEventListener("change", () => {
+    updateFileCount("folder", "folder-selected");
+  });
+
+  document.getElementById("files").addEventListener("change", () => {
+    updateFileCount("files", "files-selected");
+  });
+
+  // Clear the other input if one is selected
+  document.getElementById("folder").addEventListener("change", function() {
+    if (this.files.length > 0) {
+      document.getElementById("files").value = "";
+      updateFileCount("files", "files-selected");
+    }
+  });
+
+  document.getElementById("files").addEventListener("change", function() {
+    if (this.files.length > 0) {
+      document.getElementById("folder").value = "";
+      updateFileCount("folder", "folder-selected");
+    }
   });
 </script>
 {% endblock %}

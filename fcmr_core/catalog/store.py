@@ -63,6 +63,8 @@ def init_catalog() -> None:
             ("sniffed_headers", "TEXT"),
             ("column_mapping", "TEXT"),
             ("engagement_id", "TEXT"),
+            ("batch_id", "TEXT"),
+            ("ingested_at", "TEXT"),
         ]:
             try:
                 con.execute(f"ALTER TABLE uploads ADD COLUMN {col} {dtype}")
@@ -101,18 +103,27 @@ def init_catalog() -> None:
         con.execute("UPDATE uploads SET engagement_id = 'default' WHERE engagement_id IS NULL")
         con.execute("UPDATE runs SET engagement_id = 'default' WHERE engagement_id IS NULL")
 
+        # Backfill batch_id and ingested_at for existing uploads (for consistency)
+        con.execute("UPDATE uploads SET batch_id = 'legacy' WHERE batch_id IS NULL")
+        con.execute("UPDATE uploads SET ingested_at = created_at WHERE ingested_at IS NULL")
+
 
 # ---------------------------------------------------------------------------
 # Upload CRUD
 # ---------------------------------------------------------------------------
 
-def create_upload(report_type: str, filename: str) -> str:
+def create_upload(
+    report_type: str,
+    filename: str,
+    batch_id: str | None = None,
+    engagement_id: str | None = None,
+) -> str:
     uid = str(uuid.uuid4())
     with _conn() as con:
         con.execute(
-            "INSERT INTO uploads (upload_id, report_type, filename, status, created_at) "
-            "VALUES (?, ?, ?, 'mapping_pending', ?)",
-            [uid, report_type, filename, _now()],
+            "INSERT INTO uploads (upload_id, report_type, filename, status, created_at, batch_id, engagement_id) "
+            "VALUES (?, ?, ?, 'mapping_pending', ?, ?, ?)",
+            [uid, report_type, filename, _now(), batch_id, engagement_id],
         )
     return uid
 
@@ -136,12 +147,14 @@ def set_upload_ready(
     parquet_path: Path,
     row_count: int,
     column_mapping: dict,
+    batch_id: str | None = None,
+    ingested_at: str | None = None,
 ) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE uploads SET parquet_path=?, row_count=?, column_mapping=?, status='ready' "
+            "UPDATE uploads SET parquet_path=?, row_count=?, column_mapping=?, batch_id=?, ingested_at=?, status='ready' "
             "WHERE upload_id=?",
-            [str(parquet_path), row_count, json.dumps(column_mapping), upload_id],
+            [str(parquet_path), row_count, json.dumps(column_mapping), batch_id, ingested_at, upload_id],
         )
 
 

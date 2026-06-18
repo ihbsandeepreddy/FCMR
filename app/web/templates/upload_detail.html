@@ -18,6 +18,12 @@
         <dt>Status</dt><dd><span class="badge badge-{{ upload.status }}">{{ upload.status.replace("_"," ") }}</span></dd>
         <dt>Row Count</dt><dd class="mono">{{ "{:,}".format(upload.row_count) if upload.row_count else "—" }}</dd>
         <dt>Uploaded</dt><dd class="timestamp">{{ upload.created_at[:19].replace("T"," ") }} UTC</dd>
+        {% if upload.ingested_at %}
+        <dt>Ingested</dt><dd class="timestamp">{{ upload.ingested_at[:19].replace("T"," ") }} UTC</dd>
+        {% endif %}
+        {% if upload.batch_id %}
+        <dt>Batch ID</dt><dd class="mono" style="font-size:11px;">{{ upload.batch_id }}</dd>
+        {% endif %}
         <dt>Upload ID</dt><dd class="mono" style="font-size:11px;">{{ upload.upload_id }}</dd>
       </dl>
     </div>
