@@ -80,11 +80,32 @@
   </div>
 </div>
 
+{# Charts #}
+{% if donut_svg and bar_svg %}
+<div class="card" style="padding:20px; margin-bottom:16px;">
+  <div class="card-title" style="margin-bottom:16px;">Exception Summary Charts</div>
+  <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px;">
+    <!-- Donut chart -->
+    <div style="flex-shrink:0;">
+      {{ donut_svg | safe }}
+    </div>
+    <!-- Bar chart -->
+    <div style="flex-grow:1; min-width:350px; overflow-x:auto;">
+      {{ bar_svg | safe }}
+    </div>
+  </div>
+  <div class="card-actions" style="margin-top:12px; gap:8px;">
+    <a href="/runs/{{ run.run_id }}/export/svg" class="btn btn-sm btn-ghost" download>Export SVG</a>
+    <button onclick="window.print()" class="btn btn-sm btn-ghost">Print / PDF</button>
+  </div>
+</div>
+{% endif %}
+
 {# Exception codes table #}
-{% if summary.top_codes %}
+{% if summary.exception_codes %}
 <div class="card" style="padding:0; overflow:hidden;">
   <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border);">
-    <div class="card-title" style="margin-bottom:0;">Exception Breakdown</div>
+    <div class="card-title" style="margin-bottom:0;">Exception Codes Detail</div>
   </div>
   <table class="data-table">
     <thead>
