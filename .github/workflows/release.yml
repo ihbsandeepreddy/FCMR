@@ -34,10 +34,30 @@ jobs:
       - name: Build Python backend (PyInstaller)
         run: npm run build:backend
 
-      # electron-builder publishes the installer + latest.yml directly to the
-      # sangir-releases repo (see publish: in electron-builder.yml). GH_TOKEN must
-      # be a PAT with contents:write on ihbsandeepreddy/sangir-releases.
-      - name: Build, package, and publish Electron app
-        run: npm run dist
+      # Build the NSIS installer locally on the runner WITHOUT publishing.
+      # This always succeeds (no token needed) and produces dist/SAND-Setup-*.exe.
+      - name: Build and package Electron app
+        run: npm run dist -- --publish never
+
+      # The installer is always retrievable from the Actions run, even if the
+      # cross-repo publish below cannot run (e.g. RELEASE_TOKEN not configured).
+      - name: Upload installer as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAND-Setup-${{ github.ref_name }}
+          path: |
+            dist/SAND-Setup-*.exe
+            dist/SAND-Setup-*.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+
+      # Publish the installer + latest.yml to the public sangir-releases repo so
+      # the auto-updater can find it. Requires RELEASE_TOKEN to be a PAT with
+      # contents:write on ihbsandeepreddy/sangir-releases. Non-fatal: if the token
+      # is missing/insufficient, the build still succeeds and the artifact above
+      # remains downloadable.
+      - name: Publish to sangir-releases
+        continue-on-error: true
+        run: npm run dist -- --publish always
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
