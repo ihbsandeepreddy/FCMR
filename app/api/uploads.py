@@ -182,8 +182,8 @@ async def map_columns_form(request: Request, upload_id: str):
     else:
         if schema:
             suggested_with_scores = schema.map_headers_with_scores(raw_headers)
-            # Also include exact matches for display
-            suggested = schema.map_headers(raw_headers)
+            # Build suggested dict from fuzzy+exact matches (keys are raw_headers, values are canonicals)
+            suggested = {raw_h: canonical for raw_h, (canonical, score) in suggested_with_scores.items()}
 
     canonical_fields = get_canonical_fields(upload["report_type"])
 

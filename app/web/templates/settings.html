@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Settings — SanGir Automations{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+
+<div style="max-width:600px;">
+
+  {% if message %}
+  <div class="notice" style="margin-bottom:16px; background:var(--ok-bg); border-left:4px solid var(--ok-text);">
+    {{ message }}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="card-title">Column Mapping</div>
+    <div class="card-sub">Fuzzy matching threshold (0.0–1.0)</div>
+
+    <form method="POST" action="/settings">
+      <div class="form-group">
+        <label for="threshold">Fuzzy Match Threshold</label>
+        <div style="display:flex; gap:12px; align-items:center;">
+          <input type="range" id="threshold" name="value" min="0" max="100" value="{{ (settings.get('fuzzy_match_threshold', '0.6') | float * 100) | int }}" step="5" style="flex:1; max-width:300px;">
+          <span id="threshold-display" style="font-weight:600; min-width:50px; text-align:right;">0.60</span>
+        </div>
+        <p class="help-text" style="margin-top:8px;">
+          <strong>Lower = more suggestions</strong> (e.g., 0.5 suggests more fuzzy matches)
+          <br/><strong>Higher = stricter</strong> (e.g., 0.8 only suggests close matches)
+          <br/>Default: 0.6 (60% similarity required)
+        </p>
+      </div>
+
+      <input type="hidden" name="key" value="fuzzy_match_threshold">
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save Settings</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="background:var(--row-alt);">
+    <div class="card-title" style="font-size:14px; margin-bottom:8px;">Examples</div>
+    <ul style="padding-left:18px; margin:0; display:flex; flex-direction:column; gap:6px;">
+      <li style="font-size:12.5px;"><code>0.5</code> — Matches "customer name" → "full_name", "email addr" → "email"</li>
+      <li style="font-size:12.5px;"><code>0.6</code> — Matches "cust_id" → "customer_id", "pan_no" → "pan"</li>
+      <li style="font-size:12.5px;"><code>0.8</code> — Matches only very close variations (e.g., "PAN" → "pan")</li>
+    </ul>
+  </div>
+
+</div>
+
+<script>
+  const slider = document.getElementById('threshold');
+  const display = document.getElementById('threshold-display');
+
+  function updateDisplay() {
+    const val = (slider.value / 100).toFixed(2);
+    display.textContent = val;
+  }
+
+  slider.addEventListener('input', updateDisplay);
+  updateDisplay();
+</script>
+
+{% endblock %}

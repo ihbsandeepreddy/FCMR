@@ -9,9 +9,10 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
+from fcmr_core.catalog import store
 from fcmr_core.catalog.store import init_catalog
 from fcmr_core.config import settings
-from app.api import auth, downloads, engagements, runs, uploads
+from app.api import auth, downloads, engagements, runs, settings, uploads
 
 
 @asynccontextmanager
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
     settings.ensure_dirs()
     init_catalog()
     auth._ensure_admin()
+    store.init_settings()
     yield
 
 
@@ -64,3 +66,6 @@ app.include_router(runs.router, prefix="", tags=["runs"])
 
 # Download routes — require login
 app.include_router(downloads.router, prefix="", tags=["downloads"])
+
+# Settings routes — require login
+app.include_router(settings.router, prefix="", tags=["settings"])

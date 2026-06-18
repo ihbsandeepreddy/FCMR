@@ -9,7 +9,8 @@ from typing import Any
 
 import yaml
 
-from fcmr_core.config import settings
+from fcmr_core.config import settings as config_settings
+from fcmr_core.catalog import store as catalog_store
 
 _REGISTRY: dict[str, "SchemaMap"] = {}
 
@@ -62,6 +63,13 @@ class SchemaMap:
 
     def map_headers_with_scores(self, raw_headers: list[str]) -> dict[str, tuple[str, float]]:
         """Return {raw_header: (canonical_name, confidence_score)} for all recognisable columns."""
+        # Load threshold from database (or config default)
+        threshold_str = catalog_store.get_setting("fuzzy_match_threshold")
+        try:
+            threshold = float(threshold_str) if threshold_str else config_settings.fuzzy_match_threshold
+        except (ValueError, TypeError):
+            threshold = config_settings.fuzzy_match_threshold
+
         result: dict[str, tuple[str, float]] = {}
         for h in raw_headers:
             best_match = None
@@ -72,8 +80,8 @@ class SchemaMap:
                 if score > best_score:
                     best_score = score
                     best_match = col.canonical
-            # Only include if score is reasonable (>= 0.6)
-            if best_match and best_score >= 0.6:
+            # Only include if score meets threshold
+            if best_match and best_score >= threshold:
                 result[h] = (best_match, round(best_score, 2))
         return result
 
@@ -126,6 +134,6 @@ def get_canonical_fields(report_type: str) -> list[ColumnSpec]:
 
 def _reload() -> None:
     _REGISTRY.clear()
-    for yaml_file in settings.schemas_dir.glob("*.yaml"):
+    for yaml_file in config_settings.schemas_dir.glob("*.yaml"):
         schema = _load_yaml(yaml_file)
         _REGISTRY[schema.report_type] = schema

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     ingest_chunk_rows: int = 100_000
     max_upload_bytes: int = 2 * 1024**3  # 2 GB hard limit per upload
 
+    # Column mapping — fuzzy match threshold (0.0–1.0; suggest if >= this score)
+    fuzzy_match_threshold: float = 0.6
+
     # Aadhaar — salt is environment-injectable; do NOT hardcode a real value here.
     aadhaar_hash_salt: str = "change-me-via-FCMR_AADHAAR_HASH_SALT"
 

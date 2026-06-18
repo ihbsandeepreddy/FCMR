@@ -108,6 +108,15 @@ def init_catalog() -> None:
             )
         """)
 
+        # Create settings table
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key             TEXT PRIMARY KEY,
+                value           TEXT NOT NULL,
+                updated_at      TEXT NOT NULL
+            )
+        """)
+
         # Create a default engagement for existing uploads
         try:
             con.execute("""
@@ -385,6 +394,49 @@ def list_profiles(report_type: str, engagement_id: str | None = None) -> list[di
             ).fetchall()
         cols = [d[0] for d in con.description]
     return [dict(zip(cols, r)) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Settings CRUD
+# ---------------------------------------------------------------------------
+
+def get_setting(key: str) -> str | None:
+    """Get a setting value by key."""
+    with _conn() as con:
+        rows = con.execute("SELECT value FROM settings WHERE key=?", [key]).fetchall()
+        if not rows:
+            return None
+    return rows[0][0]
+
+
+def set_setting(key: str, value: str) -> None:
+    """Set a setting value."""
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=?, updated_at=?",
+            [key, value, _now(), value, _now()],
+        )
+
+
+def list_settings() -> dict[str, str]:
+    """List all settings."""
+    with _conn() as con:
+        rows = con.execute("SELECT key, value FROM settings ORDER BY key").fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
+def init_settings() -> None:
+    """Initialize default settings if they don't exist."""
+    from fcmr_core.config import settings as config_settings
+
+    defaults = {
+        "fuzzy_match_threshold": str(config_settings.fuzzy_match_threshold),
+    }
+
+    for key, value in defaults.items():
+        if not get_setting(key):
+            set_setting(key, value)
 
 
 def _now() -> str:
