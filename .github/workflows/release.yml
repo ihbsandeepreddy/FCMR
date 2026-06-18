@@ -34,17 +34,10 @@ jobs:
       - name: Build Python backend (PyInstaller)
         run: npm run build:backend
 
-      - name: Build and package Electron app
+      # electron-builder publishes the installer + latest.yml directly to the
+      # sangir-releases repo (see publish: in electron-builder.yml). GH_TOKEN must
+      # be a PAT with contents:write on ihbsandeepreddy/sangir-releases.
+      - name: Build, package, and publish Electron app
         run: npm run dist
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/SAND-Setup-*.exe
-            dist/latest.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ihbsandeepreddy/sangir-releases

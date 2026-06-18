@@ -30,13 +30,15 @@ function spawnBackend() {
     ? "python"
     : path.join(process.resourcesPath, "sangir-backend", "sangir-backend.exe");
 
+  // desktop_backend.py lives at the repo root (one level up from electron/)
+  const repoRoot = path.join(__dirname, "..");
   const args = isDev ? ["desktop_backend.py"] : [];
-  const env = { ...process.env, FCMR_BACKEND_PORT: BACKEND_PORT };
+  const env = { ...process.env, FCMR_BACKEND_PORT: String(BACKEND_PORT) };
 
   backendProcess = spawn(backendExe, args, {
     env,
     stdio: "inherit", // Show backend logs in console
-    cwd: isDev ? __dirname : undefined,
+    cwd: isDev ? repoRoot : undefined,
   });
 
   backendProcess.on("error", (err) => {

@@ -17,11 +17,9 @@ extraResources:
 win:
   target:
     - nsis
-  certificateFile: null
-  certificatePassword: null
+  artifactName: SAND-Setup-${version}.${ext}
   signingHashAlgorithms:
     - sha256
-  sign: null
 
 nsis:
   oneClick: false
