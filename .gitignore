@@ -40,3 +40,8 @@ htmlcov/
 
 # Ruff / Black cache
 .ruff_cache/
+
+# Server logs
+uvicorn.log
+uvicorn_err.log
+*.log
