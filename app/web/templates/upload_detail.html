@@ -29,7 +29,7 @@
     </div>
     <div class="card-actions" style="margin-top:0; flex-shrink:0;">
       {% if upload.status == "mapping_pending" %}
-        <a href="/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-primary">Map Columns →</a>
+        <a href="/dashboard/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-primary">Map Columns →</a>
         <p class="help-text" style="margin-top:8px;">Column mapping required before analytics can run.</p>
       {% elif upload.status == "ready" %}
         <form method="POST" action="/uploads/{{ upload.upload_id }}/run">
@@ -53,7 +53,7 @@
 <div class="card" style="padding:0; overflow:hidden;">
   <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px;">
     <div class="card-title" style="margin-bottom:0;">Active Column Mapping</div>
-    <a href="/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-sm btn-ghost" style="margin-left:auto;">Edit &amp; Re-ingest</a>
+    <a href="/dashboard/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-sm btn-ghost" style="margin-left:auto;">Edit &amp; Re-ingest</a>
   </div>
   <table class="data-table" style="max-width:100%;">
     <thead>

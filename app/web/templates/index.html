@@ -74,13 +74,13 @@
         <td class="timestamp">{{ u.created_at[:16].replace("T"," ") }}</td>
         <td class="timestamp">{{ u.ingested_at[:16].replace("T"," ") if u.ingested_at else "—" }}</td>
         <td style="text-align:right; white-space:nowrap;">
-          <a href="/uploads/{{ u.upload_id }}" class="btn btn-sm btn-ghost">View</a>
+          <a href="/dashboard/uploads/{{ u.upload_id }}" class="btn btn-sm btn-ghost">View</a>
           {% if u.status == "ready" %}
           <form method="POST" action="/uploads/{{ u.upload_id }}/run" style="display:inline">
             <button type="submit" class="btn btn-sm btn-run" style="margin-left:4px;">▶ Run</button>
           </form>
           {% elif u.status == "mapping_pending" %}
-          <a href="/uploads/{{ u.upload_id }}/map-columns" class="btn btn-sm btn-primary" style="margin-left:4px;">Map →</a>
+          <a href="/dashboard/uploads/{{ u.upload_id }}/map-columns" class="btn btn-sm btn-primary" style="margin-left:4px;">Map →</a>
           {% endif %}
         </td>
       </tr>

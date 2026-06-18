@@ -149,7 +149,7 @@ async def map_columns_form(request: Request, upload_id: str):
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
     if upload["status"] != "mapping_pending":
-        return RedirectResponse(url=f"/uploads/{upload_id}", status_code=303)
+        return RedirectResponse(url=f"/dashboard/uploads/{upload_id}", status_code=303)
 
     raw_headers: list[str] = json.loads(upload["sniffed_headers"] or "[]")
     schema = get_schema(upload["report_type"])
@@ -243,7 +243,7 @@ async def do_map_columns(request: Request, upload_id: str):
         store.set_upload_failed(upload_id, error=str(exc))
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
 
-    return RedirectResponse(url=f"/uploads/{upload_id}", status_code=303)
+    return RedirectResponse(url=f"/dashboard/uploads/{upload_id}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
