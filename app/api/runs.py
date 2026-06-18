@@ -13,7 +13,6 @@ from fastapi.templating import Jinja2Templates
 
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
-from fcmr_core.ingestion.pipeline import read_parquet
 from fcmr_core.reporting.builder import build_exception_csvs
 from fcmr_core.reporting.aggregation import aggregate_status_counts, aggregate_exception_codes
 from fcmr_core.reporting.charts import build_donut_svg, build_bar_chart
@@ -34,25 +33,18 @@ async def start_run(upload_id: str, background_tasks: BackgroundTasks):
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
-    parquet_path = Path(upload["parquet_path"])
-    if not parquet_path.exists():
-        raise HTTPException(status_code=500, detail="Parquet file not found on disk")
-
     run_id = store.create_run(upload_id)
     store.update_run(run_id, status="running", started_at=_now())
 
-    # Run in a background thread so the browser gets an immediate response.
-    # FastAPI BackgroundTasks run after the response is sent but in the same
-    # process thread pool — sufficient for CPU-bound work without a job queue.
-    background_tasks.add_task(_run_analytics, run_id, parquet_path)
+    background_tasks.add_task(_run_analytics, run_id, upload_id)
 
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
 
-def _run_analytics(run_id: str, parquet_path: Path) -> None:
+def _run_analytics(run_id: str, upload_id: str) -> None:
     """Execute the full analytics pipeline and update the catalog when done."""
     try:
-        df = read_parquet(parquet_path).collect()
+        df = store.get_upload_df(upload_id)
         annotated = run_pipeline(df)
         out_dir = settings.outputs_dir / run_id
         wide_path, long_path = build_exception_csvs(annotated, run_id, out_dir)

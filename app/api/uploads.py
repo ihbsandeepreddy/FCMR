@@ -231,9 +231,18 @@ async def do_map_columns(request: Request, upload_id: str):
 
     try:
         result = ingest_csv(csv_path, upload["report_type"], upload_id, user_mapping=user_mapping)
+
+        # Import Parquet into DuckDB, then delete both Parquet and raw CSV from disk
+        store.store_upload_data(upload_id, result.parquet_path)
+        csv_path.unlink(missing_ok=True)
+        try:
+            csv_path.parent.rmdir()
+        except Exception:
+            pass
+
         store.set_upload_ready(
             upload_id,
-            parquet_path=result.parquet_path,
+            parquet_path=result.parquet_path,  # kept in DB record for reference
             row_count=result.total_rows,
             column_mapping=user_mapping,
         )
