@@ -11,6 +11,9 @@ build/
 venv/
 *.egg
 
+# Allow PyInstaller spec files
+!build/*.spec
+
 # Data — never commit user data or generated outputs
 data/
 *.parquet
