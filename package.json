@@ -17,13 +17,13 @@
     "test": "pytest -m 'not perf' -v"
   },
   "dependencies": {
-    "electron-updater": "^7.0.0",
+    "electron-updater": "^6.2.0",
     "axios": "^1.7.0"
   },
   "devDependencies": {
-    "electron": "^30.0.0",
-    "electron-builder": "^25.0.0",
-    "concurrently": "^8.0.0"
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.0",
+    "concurrently": "^8.2.0"
   },
   "build": {
     "appId": "com.sangir.automations",
