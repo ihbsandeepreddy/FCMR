@@ -43,56 +43,41 @@
     <table class="data-table">
       <thead>
         <tr>
-          <th style="width:30%">CSV Column</th>
-          <th style="width:22%">Suggested</th>
-          <th>Map To</th>
+          <th style="width:30%">Canonical Field</th>
+          <th style="width:80px; text-align:center">Required</th>
+          <th>CSV Column</th>
           <th style="width:90px; text-align:center">Status</th>
         </tr>
       </thead>
       <tbody>
-        {% for header in raw_headers %}
-        {% set idx = loop.index0 %}
-        {% set auto = suggested.get(header, "") %}
-        {% set score_data = suggested_with_scores.get(header, ()) %}
-        {% set canonical, score = score_data if score_data else ("", "") %}
-        <tr class="map-row{% if not auto %} row-skip{% endif %}" data-idx="{{ idx }}">
-          <td><code class="mono">{{ header }}</code></td>
+        {% for spec in canonical_fields %}
+        {% set auto_raw = suggested_inverse.get(spec.canonical, "") %}
+        <tr class="map-row{% if not auto_raw %} row-skip{% endif %}" data-canonical="{{ spec.canonical }}">
           <td>
-            {% if auto %}
-              <span class="mono" style="color:var(--ok-text);">{{ auto }}</span>
-              {% if score_data and score %}
-              <div style="font-size:11px; color:var(--muted); margin-top:2px;">{{ (score * 100) | int }}%</div>
-              {% endif %}
+            <code class="mono">{{ spec.canonical }}</code>
+            {% if spec.required %}<span style="color:var(--error-text); margin-left:4px;">*</span>{% endif %}
+          </td>
+          <td style="text-align:center;">
+            {% if spec.required %}
+              <span class="badge badge-auto">Yes</span>
             {% else %}
-              <span style="color:var(--faint); font-size:12px;">— not recognised —</span>
+              <span style="color:var(--faint); font-size:12px;">—</span>
             {% endif %}
           </td>
           <td>
-            <select name="map_{{ idx }}" class="col-select" data-row="{{ idx }}">
-              <option value="__skip__"{% if not auto %} selected{% endif %}>— Skip —</option>
-              {% if canonical_fields | selectattr("required") | list %}
-              <optgroup label="Required fields">
-                {% for spec in canonical_fields %}{% if spec.required %}
-                <option value="{{ spec.canonical }}" data-field="{{ spec.canonical }}"{% if auto == spec.canonical %} selected{% endif %}>
-                  {{ spec.canonical }} *
-                </option>
-                {% endif %}{% endfor %}
-              </optgroup>
-              {% endif %}
-              <optgroup label="Optional fields">
-                {% for spec in canonical_fields %}{% if not spec.required %}
-                <option value="{{ spec.canonical }}" data-field="{{ spec.canonical }}"{% if auto == spec.canonical %} selected{% endif %}>
-                  {{ spec.canonical }}
-                </option>
-                {% endif %}{% endfor %}
-              </optgroup>
+            <select name="map_{{ spec.canonical }}" class="col-select" data-canonical="{{ spec.canonical }}">
+              <option value="__skip__"{% if not auto_raw %} selected{% endif %}>— Skip —</option>
+              {% for header in raw_headers %}
+              <option value="{{ header }}" data-header="{{ header }}"{% if auto_raw == header %} selected{% endif %}>
+                {{ header }}
+              </option>
+              {% endfor %}
             </select>
           </td>
           <td style="text-align:center;">
-            <span class="badge status-badge-{{ idx }}
-              {% if not auto %}badge-skip
-              {% else %}badge-auto{% endif %}">
-              {% if not auto %}Skip{% else %}Auto{% endif %}
+            <span class="badge status-badge-{{ spec.canonical | replace(' ','_') }}
+              {% if not auto_raw %}badge-skip{% else %}badge-auto{% endif %}">
+              {% if not auto_raw %}Skip{% else %}Auto{% endif %}
             </span>
           </td>
         </tr>
@@ -111,24 +96,22 @@
 function updateAllDropdowns() {
   var allSelects = document.querySelectorAll('.col-select');
 
-  // Collect all currently selected canonical fields (non-skip)
-  var selectedFields = new Set();
+  // Collect all currently selected raw headers (non-skip)
+  var selectedHeaders = new Set();
   allSelects.forEach(function(sel) {
     if (sel.value && sel.value !== '__skip__') {
-      selectedFields.add(sel.value);
+      selectedHeaders.add(sel.value);
     }
   });
 
-  // For each dropdown, show/hide options
+  // For each dropdown, hide options already selected elsewhere
   allSelects.forEach(function(sel) {
     var currentValue = sel.value;
-    var options = sel.querySelectorAll('option[data-field]');
-
+    var options = sel.querySelectorAll('option[data-header]');
     options.forEach(function(opt) {
-      var field = opt.getAttribute('data-field');
-      // Show if: it's the currently selected value, or it's not selected elsewhere
-      var isSelected = (field === currentValue);
-      var isUsedElsewhere = selectedFields.has(field) && !isSelected;
+      var header = opt.getAttribute('data-header');
+      var isSelected = (header === currentValue);
+      var isUsedElsewhere = selectedHeaders.has(header) && !isSelected;
       opt.style.display = isUsedElsewhere ? 'none' : '';
     });
   });
@@ -136,24 +119,24 @@ function updateAllDropdowns() {
 
 document.querySelectorAll('.col-select').forEach(function(sel) {
   function update() {
-    var idx = sel.dataset.row;
+    var canonical = sel.dataset.canonical;
+    var safeKey = canonical.replace(/ /g, '_');
     var row = sel.closest('tr');
-    var badge = document.querySelector('.status-badge-' + idx);
+    var badge = document.querySelector('.status-badge-' + safeKey);
     if (sel.value === '__skip__') {
       row.classList.add('row-skip');
       badge.textContent = 'Skip';
-      badge.className = 'badge badge-skip status-badge-' + idx;
+      badge.className = 'badge badge-skip status-badge-' + safeKey;
     } else {
       row.classList.remove('row-skip');
       badge.textContent = 'Manual';
-      badge.className = 'badge badge-manual status-badge-' + idx;
+      badge.className = 'badge badge-manual status-badge-' + safeKey;
     }
     updateAllDropdowns();
   }
   sel.addEventListener('change', update);
 });
 
-// Initial state
 updateAllDropdowns();
 </script>
 {% endblock %}

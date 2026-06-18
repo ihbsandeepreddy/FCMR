@@ -187,6 +187,9 @@ async def map_columns_form(request: Request, upload_id: str):
 
     canonical_fields = get_canonical_fields(upload["report_type"])
 
+    # Invert suggested map: canonical -> raw_header (for the new UI direction)
+    suggested_inverse = {canonical: raw_h for raw_h, canonical in suggested.items()}
+
     return templates.TemplateResponse(
         request=request, name="column_map.html",
         context={
@@ -194,6 +197,7 @@ async def map_columns_form(request: Request, upload_id: str):
             "raw_headers": raw_headers,
             "suggested": suggested,
             "suggested_with_scores": suggested_with_scores,
+            "suggested_inverse": suggested_inverse,
             "canonical_fields": canonical_fields,
             "profile_applied": profile_applied,
             "profile_id": saved_profile.get("profile_id") if saved_profile else None,
@@ -210,12 +214,13 @@ async def do_map_columns(request: Request, upload_id: str):
     form = await request.form()
     raw_headers: list[str] = json.loads(upload["sniffed_headers"] or "[]")
 
-    # Form fields are named map_0, map_1, … matching raw_headers[i]
+    # Form fields are named map_<canonical> = raw_header (canonical fields are the fixed left side)
+    canonical_fields = get_canonical_fields(upload["report_type"])
     user_mapping: dict[str, str] = {}
-    for i, header in enumerate(raw_headers):
-        canonical = str(form.get(f"map_{i}", "") or "").strip()
-        if canonical and canonical != "__skip__":
-            user_mapping[header] = canonical
+    for spec in canonical_fields:
+        raw_header = str(form.get(f"map_{spec.canonical}", "") or "").strip()
+        if raw_header and raw_header != "__skip__":
+            user_mapping[raw_header] = spec.canonical
 
     csv_path = Path(upload["csv_path"] or "")
     if not csv_path.exists():

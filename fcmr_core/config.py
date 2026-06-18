@@ -1,6 +1,11 @@
+import os
 import secrets
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# On Vercel the filesystem is read-only except /tmp
+_ON_VERCEL = bool(os.environ.get("VERCEL"))
+_DATA_ROOT = Path("/tmp/fcmr") if _ON_VERCEL else Path(__file__).resolve().parent.parent / "data"
 
 
 class Settings(BaseSettings):
@@ -8,13 +13,13 @@ class Settings(BaseSettings):
 
     # Root paths
     base_dir: Path = Path(__file__).resolve().parent.parent
-    data_dir: Path = base_dir / "data"
-    uploads_dir: Path = data_dir / "uploads"
-    parquet_dir: Path = data_dir / "parquet"
-    outputs_dir: Path = data_dir / "outputs"
+    data_dir: Path = _DATA_ROOT
+    uploads_dir: Path = _DATA_ROOT / "uploads"
+    parquet_dir: Path = _DATA_ROOT / "parquet"
+    outputs_dir: Path = _DATA_ROOT / "outputs"
     reference_dir: Path = Path(__file__).resolve().parent / "reference"
     schemas_dir: Path = Path(__file__).resolve().parent / "schemas"
-    catalog_path: Path = data_dir / "catalog.duckdb"
+    catalog_path: Path = _DATA_ROOT / "catalog.duckdb"
 
     # Ingest tuning — keep chunk size low enough to stay inside 15 GB RAM when
     # processing 5M-row CSVs with many wide columns.
