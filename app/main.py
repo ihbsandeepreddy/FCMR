@@ -12,7 +12,7 @@ from starlette.responses import RedirectResponse, Response
 from fcmr_core.catalog import store
 from fcmr_core.catalog.store import init_catalog
 from fcmr_core.config import settings
-from app.api import auth, downloads, engagements, runs, settings as settings_api, uploads
+from app.api import auth, blob_upload, downloads, engagements, runs, settings as settings_api, uploads
 
 
 @asynccontextmanager
@@ -48,7 +48,7 @@ def _ensure_initialized() -> None:
 class LoginRequiredMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         _ensure_initialized()
-        public_paths = {"/login", "/static"}
+        public_paths = {"/login", "/static", "/api/blob-noop"}
         # Check if path starts with any public path
         is_public = any(request.url.path.startswith(p) for p in public_paths)
         if is_public:
@@ -83,3 +83,6 @@ app.include_router(downloads.router, prefix="", tags=["downloads"])
 
 # Settings routes — require login
 app.include_router(settings_api.router, prefix="", tags=["settings"])
+
+# Blob upload routes (token endpoint is public; register endpoint requires login)
+app.include_router(blob_upload.router, prefix="", tags=["blob"])

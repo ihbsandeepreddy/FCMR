@@ -123,11 +123,14 @@ async def do_upload(
                 engagement_id=engagement_id,
             )
 
-            # Store CSV to disk
+            # Stream write in 256 KB chunks — avoids holding full file in RAM
             dest_dir = settings.uploads_dir / upload_id
             dest_dir.mkdir(parents=True, exist_ok=True)
             csv_path = dest_dir / filename
-            csv_path.write_bytes(content)
+            chunk_size = 256 * 1024
+            with csv_path.open("wb") as out:
+                for i in range(0, len(content), chunk_size):
+                    out.write(content[i : i + chunk_size])
 
             # Sniff headers and set mapping_pending
             headers = sniff_headers(csv_path)
@@ -222,15 +225,47 @@ async def do_map_columns(request: Request, upload_id: str):
         if raw_header and raw_header != "__skip__":
             user_mapping[raw_header] = spec.canonical
 
-    csv_path = Path(upload["csv_path"] or "")
-    if not csv_path.exists():
-        raise HTTPException(status_code=500, detail="Uploaded CSV file not found on disk.")
+    raw_csv_path = upload["csv_path"] or ""
+    blob_downloaded = False
+
+    # If csv_path is a blob URL, download it to /tmp for ingestion
+    if raw_csv_path.startswith("http"):
+        import httpx as _httpx
+        tmp_dir = settings.uploads_dir / upload_id
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = tmp_dir / upload["filename"]
+        async with _httpx.AsyncClient(timeout=120) as client:
+            async with client.stream("GET", raw_csv_path) as resp:
+                with csv_path.open("wb") as f:
+                    async for chunk in resp.aiter_bytes(65536):
+                        f.write(chunk)
+        blob_downloaded = True
+    else:
+        csv_path = Path(raw_csv_path)
+        if not csv_path.exists():
+            raise HTTPException(status_code=500, detail="Uploaded CSV file not found on disk.")
 
     try:
         result = ingest_csv(csv_path, upload["report_type"], upload_id, user_mapping=user_mapping)
+
+        # Import Parquet into DuckDB, then delete both Parquet and raw CSV from disk
+        store.store_upload_data(upload_id, result.parquet_path)
+        if blob_downloaded:
+            csv_path.unlink(missing_ok=True)
+            try:
+                csv_path.parent.rmdir()
+            except Exception:
+                pass
+        else:
+            csv_path.unlink(missing_ok=True)
+            try:
+                csv_path.parent.rmdir()
+            except Exception:
+                pass
+
         store.set_upload_ready(
             upload_id,
-            parquet_path=result.parquet_path,
+            parquet_path=result.parquet_path,  # kept in DB record for reference
             row_count=result.total_rows,
             column_mapping=user_mapping,
         )
