@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.catalog import store
@@ -24,6 +24,10 @@ from fcmr_core.sampling.sample import select_sample
 logger = get_logger("processing")
 
 router = APIRouter()
+
+# In-memory set of run IDs that have been requested to cancel.
+# Checked between pipeline steps in _run_analytics.
+_cancel_requests: set[str] = set()
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
 
@@ -44,17 +48,63 @@ async def start_run(upload_id: str, background_tasks: BackgroundTasks):
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
 
+@router.post("/runs/{run_id}/cancel")
+async def cancel_run(run_id: str):
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run["status"] not in ("running", "pending"):
+        raise HTTPException(status_code=400, detail="Run is not in progress")
+    _cancel_requests.add(run_id)
+    return JSONResponse({"status": "cancel_requested"})
+
+
+@router.get("/runs/{run_id}/status")
+async def run_status(run_id: str):
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return JSONResponse({
+        "status": run["status"],
+        "progress_step": run.get("progress_step") or "",
+        "error": run.get("error") or "",
+    })
+
+
 def _run_analytics(run_id: str, upload_id: str) -> None:
     """Execute the full analytics pipeline and update the catalog when done."""
+    def _step(label: str) -> bool:
+        """Update progress step. Returns True if cancelled."""
+        if run_id in _cancel_requests:
+            _cancel_requests.discard(run_id)
+            store.update_run(run_id, status="cancelled", finished_at=_now(),
+                             error="Stopped by user.")
+            logger.info("job_cancelled run_id=%s", run_id)
+            return True
+        store.update_run(run_id, progress_step=label)
+        return False
+
     try:
         upload = store.get_upload(upload_id)
         logger.info("job_start run_id=%s upload_id=%s", run_id, upload_id)
 
+        # Verify the parquet file exists before starting
         parquet_path = Path(upload["parquet_path"])
+        if not parquet_path.exists():
+            raise FileNotFoundError(
+                f"Data file not found at {parquet_path}. "
+                "The upload may be from a different machine or session. "
+                "Please re-upload the CSV file."
+            )
+
+        if _step("Loading data file"): return
         df = read_parquet(parquet_path).collect()
         logger.info("job_loaded run_id=%s rows=%d", run_id, len(df))
 
+        if _step("Running 27 validation rules"): return
         annotated = run_pipeline(df)
+
+        if _step("Building exception reports"): return
         out_dir = settings.outputs_dir / run_id
         wide_path, long_path = build_exception_csvs(annotated, run_id, out_dir)
 
@@ -67,6 +117,7 @@ def _run_analytics(run_id: str, upload_id: str) -> None:
             finished_at=_now(),
             wide_csv=str(wide_path),
             long_csv=str(long_path),
+            progress_step="Done",
         )
     except Exception as exc:
         logger.error("job_failed run_id=%s error=%s", run_id, type(exc).__name__)

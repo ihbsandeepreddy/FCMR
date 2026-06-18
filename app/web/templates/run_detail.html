@@ -2,11 +2,7 @@
 {% block title %}Analytics Run — SanGir Automations{% endblock %}
 {% block page_title %}Data Analytics{% endblock %}
 
-{% block head %}
-{% if run.status in ["running", "pending"] %}
-<meta http-equiv="refresh" content="4">
-{% endif %}
-{% endblock %}
+{% block head %}{% endblock %}
 
 {% block topbar_actions %}
   <a href="/dashboard" class="btn btn-ghost" style="margin-left:auto;">← Dashboard</a>
@@ -33,20 +29,89 @@
   </div>
 </div>
 
-{# ── Running state ── #}
-{% if run.status == "running" %}
-<div class="card">
-  <div class="running-indicator">
-    <div class="spinner"></div>
-    <div>
+{# ── Running / pending state ── #}
+{% if run.status in ["running", "pending"] %}
+<div class="card" id="running-card">
+  <div class="running-indicator" style="align-items:flex-start; gap:16px;">
+    <div class="spinner" style="margin-top:3px; flex-shrink:0;"></div>
+    <div style="flex:1;">
       <strong style="font-size:14px;">Analytics running…</strong>
-      <p class="help-text" style="margin-top:4px;">
+      <p class="help-text" style="margin-top:4px; margin-bottom:14px;">
         Processing all rows through KYC format, duplicate, PIN and address checks.
-        This page refreshes automatically every 4 seconds.
       </p>
+
+      {# Step progress #}
+      <div style="display:flex; flex-direction:column; gap:6px;" id="steps-list">
+        {% set steps = ["Loading data file", "Running 27 validation rules", "Building exception reports"] %}
+        {% for s in steps %}
+        <div class="step-row" data-step="{{ s }}" style="display:flex; align-items:center; gap:10px; font-size:13px;">
+          <span class="step-icon" style="width:18px; text-align:center; color:var(--muted);">○</span>
+          <span style="color:var(--muted);">{{ s }}</span>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div style="margin-top:16px;">
+        <button id="stop-btn" onclick="stopRun()" class="btn btn-sm" style="background:oklch(55% 0.18 25); color:#fff; border:none;">
+          Stop
+        </button>
+      </div>
     </div>
   </div>
 </div>
+
+<script>
+(function () {
+  const RUN_ID = "{{ run.run_id }}";
+  const STEPS = ["Loading data file", "Running 27 validation rules", "Building exception reports"];
+
+  function markStep(currentStep) {
+    STEPS.forEach(function (s) {
+      const row = document.querySelector('[data-step="' + s + '"]');
+      if (!row) return;
+      const icon = row.querySelector('.step-icon');
+      const label = row.querySelector('span:last-child');
+      if (s === currentStep) {
+        icon.textContent = '▶';
+        icon.style.color = 'oklch(55% 0.18 260)';
+        label.style.color = 'var(--fg)';
+        label.style.fontWeight = '600';
+      } else if (STEPS.indexOf(s) < STEPS.indexOf(currentStep)) {
+        icon.textContent = '✓';
+        icon.style.color = 'oklch(55% 0.18 145)';
+        label.style.color = 'var(--muted)';
+        label.style.textDecoration = 'line-through';
+      }
+    });
+  }
+
+  function poll() {
+    fetch('/runs/' + RUN_ID + '/status')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.progress_step) markStep(data.progress_step);
+        if (data.status === 'running' || data.status === 'pending') {
+          setTimeout(poll, 1500);
+        } else {
+          // Reload once to show final state (completed / failed / cancelled)
+          window.location.reload();
+        }
+      })
+      .catch(function () { setTimeout(poll, 3000); });
+  }
+
+  poll();
+
+  window.stopRun = function () {
+    const btn = document.getElementById('stop-btn');
+    btn.disabled = true;
+    btn.textContent = 'Stopping…';
+    fetch('/runs/' + RUN_ID + '/cancel', { method: 'POST' })
+      .then(function () { btn.textContent = 'Stop requested'; })
+      .catch(function () { btn.disabled = false; btn.textContent = 'Stop'; });
+  };
+})();
+</script>
 
 {# ── Completed state ── #}
 {% elif summary %}
@@ -199,11 +264,20 @@
   </div>
 </div>
 
-{# ── Failed state ── #}
+{# ── Failed / cancelled state ── #}
 {% elif run.status == "failed" %}
 <div class="card card-error">
   <div class="card-title">Run Failed</div>
   <p style="margin-top:8px; font-size:13.5px;">{{ run.error or "An unknown error occurred." }}</p>
+  <div class="card-actions">
+    <a href="/dashboard" class="btn btn-ghost">← Back to Dashboard</a>
+  </div>
+</div>
+
+{% elif run.status == "cancelled" %}
+<div class="card" style="border:1px solid var(--border);">
+  <div class="card-title">Run Stopped</div>
+  <p style="margin-top:8px; font-size:13.5px; color:var(--muted);">This run was stopped before completing.</p>
   <div class="card-actions">
     <a href="/dashboard" class="btn btn-ghost">← Back to Dashboard</a>
   </div>

@@ -84,15 +84,16 @@ def init_catalog() -> None:
                 error         TEXT
             )
         """)
-        # Migrate runs table to add engagement_id and workpaper_path
-        try:
-            con.execute("ALTER TABLE runs ADD COLUMN engagement_id TEXT")
-        except Exception:
-            pass  # Column already exists
-        try:
-            con.execute("ALTER TABLE runs ADD COLUMN workpaper_path TEXT")
-        except Exception:
-            pass  # Column already exists
+        # Migrate runs table — additive only
+        for col, dtype in [
+            ("engagement_id", "TEXT"),
+            ("workpaper_path", "TEXT"),
+            ("progress_step", "TEXT"),
+        ]:
+            try:
+                con.execute(f"ALTER TABLE runs ADD COLUMN {col} {dtype}")
+            except Exception:
+                pass  # Column already exists
 
         # Create mapping_profiles table (Phase 3)
         con.execute("""
@@ -248,7 +249,7 @@ def create_run(upload_id: str) -> str:
 
 
 def update_run(run_id: str, **kwargs: str | None) -> None:
-    allowed = {"status", "started_at", "finished_at", "wide_csv", "long_csv", "error", "workpaper_path"}
+    allowed = {"status", "started_at", "finished_at", "wide_csv", "long_csv", "error", "workpaper_path", "progress_step"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return
