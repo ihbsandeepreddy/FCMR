@@ -31,9 +31,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Ensure catalog + admin user exist — idempotent, safe to call on every cold start
+_initialized = False
+
+def _ensure_initialized() -> None:
+    global _initialized
+    if not _initialized:
+        settings.ensure_dirs()
+        init_catalog()
+        auth._ensure_admin()
+        store.init_settings()
+        _initialized = True
+
+
 # Login requirement middleware
 class LoginRequiredMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
+        _ensure_initialized()
         public_paths = {"/login", "/static"}
         # Check if path starts with any public path
         is_public = any(request.url.path.startswith(p) for p in public_paths)

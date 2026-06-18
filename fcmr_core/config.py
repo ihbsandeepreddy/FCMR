@@ -37,15 +37,24 @@ class Settings(BaseSettings):
 
     def __init__(self, **data):
         super().__init__(**data)
-        # If session_secret is not provided, load from or generate one in data/
         if not self.session_secret:
-            secret_file = self.data_dir / ".session_secret"
-            if secret_file.exists():
-                self.session_secret = secret_file.read_text().strip()
+            if _ON_VERCEL:
+                # On Vercel each container is stateless — secret MUST be fixed via env var
+                # so session cookies are valid across all containers.
+                # Set FCMR_SESSION_SECRET in Vercel project environment variables.
+                raise ValueError(
+                    "FCMR_SESSION_SECRET environment variable must be set on Vercel. "
+                    "Go to Vercel → Project → Settings → Environment Variables and add "
+                    "FCMR_SESSION_SECRET with a long random string."
+                )
             else:
-                self.session_secret = secrets.token_urlsafe(32)
-                self.data_dir.mkdir(parents=True, exist_ok=True)
-                secret_file.write_text(self.session_secret)
+                secret_file = self.data_dir / ".session_secret"
+                if secret_file.exists():
+                    self.session_secret = secret_file.read_text().strip()
+                else:
+                    self.session_secret = secrets.token_urlsafe(32)
+                    self.data_dir.mkdir(parents=True, exist_ok=True)
+                    secret_file.write_text(self.session_secret)
 
     def ensure_dirs(self) -> None:
         for d in (self.uploads_dir, self.parquet_dir, self.outputs_dir):
