@@ -12,7 +12,7 @@ from starlette.responses import RedirectResponse, Response
 from fcmr_core.catalog import store
 from fcmr_core.catalog.store import init_catalog
 from fcmr_core.config import settings
-from app.api import auth, blob_upload, downloads, engagements, runs, settings as settings_api, uploads
+from app.api import auth, blob_upload, downloads, ead_consolidate, engagements, runs, settings as settings_api, uploads
 
 
 @asynccontextmanager
@@ -86,3 +86,6 @@ app.include_router(settings_api.router, prefix="", tags=["settings"])
 
 # Blob upload routes (token endpoint is public; register endpoint requires login)
 app.include_router(blob_upload.router, prefix="", tags=["blob"])
+
+# EAD consolidation routes — require login
+app.include_router(ead_consolidate.router, prefix="", tags=["ead"])

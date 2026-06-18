@@ -14,7 +14,7 @@
     <div>
       <div class="card-title" style="font-size:16px; margin-bottom:6px;">{{ upload.filename }}</div>
       <dl class="detail-grid" style="margin-top:8px;">
-        <dt>Report Type</dt><dd><span class="badge badge-type">{{ upload.report_type.replace("_"," ").title() }}</span></dd>
+        <dt>Report Type</dt><dd><span class="badge badge-type">{{ "EAD Files" if upload.report_type == "ead_files" else upload.report_type.replace("_"," ").title() }}</span></dd>
         <dt>Status</dt><dd><span class="badge badge-{{ upload.status }}">{{ upload.status.replace("_"," ") }}</span></dd>
         <dt>Row Count</dt><dd class="mono">{{ "{:,}".format(upload.row_count) if upload.row_count else "—" }}</dd>
         <dt>Uploaded</dt><dd class="timestamp">{{ upload.created_at[:19].replace("T"," ") }} UTC</dd>

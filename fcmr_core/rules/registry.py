@@ -48,9 +48,39 @@ def list_rules() -> list[RuleMeta]:
     return list(_REGISTRY)
 
 
+_NUMERIC_CANONICALS = {
+    "loan_amount", "outstanding_principal", "emi_amount", "age",
+    "sanctioned_amount", "disbursed_amount", "outstanding_balance",
+}
+
+
+def _coerce_str_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Cast any non-numeric, non-exception column to Utf8.
+
+    Polars scan_csv can infer Int64 for columns like bank_account or pincode
+    when all values are numeric. Rules call .strip() on Python values iterated
+    from those columns, which raises AttributeError on int. This coercion runs
+    once before the rule pipeline so every rule sees string values.
+    """
+    casts = []
+    for col in df.columns:
+        if col.startswith("_exc_"):
+            continue
+        if col in _NUMERIC_CANONICALS:
+            continue
+        if df[col].dtype in (pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+                             pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+                             pl.Float32, pl.Float64):
+            casts.append(pl.col(col).cast(pl.Utf8, strict=False))
+    if casts:
+        df = df.with_columns(casts)
+    return df
+
+
 def run_pipeline(df: pl.DataFrame) -> pl.DataFrame:
     """Run all registered rules in registration order, returning an annotated frame."""
     _ensure_rules_loaded()
+    df = _coerce_str_columns(df)
     for meta in _REGISTRY:
         df = meta.fn(df)
     return df

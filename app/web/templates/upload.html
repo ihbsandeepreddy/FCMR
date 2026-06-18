@@ -15,7 +15,7 @@
         <label for="report_type">Report Type</label>
         <select name="report_type" id="report_type" required>
           {% for rt in report_types %}
-          <option value="{{ rt }}">{{ rt.replace("_"," ").title() }}</option>
+          <option value="{{ rt }}">{{ "EAD Files" if rt == "ead_files" else rt.replace("_"," ").title() }}</option>
           {% endfor %}
         </select>
         <p class="help-text">Select the type of report you are uploading.</p>
