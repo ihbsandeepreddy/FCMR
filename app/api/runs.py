@@ -17,6 +17,8 @@ from fcmr_core.ingestion.pipeline import read_parquet
 from fcmr_core.reporting.builder import build_exception_csvs
 from fcmr_core.reporting.aggregation import aggregate_status_counts, aggregate_exception_codes
 from fcmr_core.reporting.charts import build_donut_svg, build_bar_chart
+from fcmr_core.reporting.workpaper import build_workpaper
+from fcmr_core.sampling.sample import select_sample
 from fcmr_core.rules.registry import run_pipeline
 
 router = APIRouter()
@@ -194,6 +196,58 @@ async def get_bar_chart(run_id: str):
     bar_svg = build_bar_chart(exception_codes, width=700, height=400)
 
     return {"bar_svg": bar_svg}
+
+
+@router.get("/runs/{run_id}/export/workpaper")
+async def export_workpaper(run_id: str):
+    """Generate and download workpaper Excel."""
+    run = store.get_run(run_id)
+    if not run or run["status"] != "completed" or not run["wide_csv"] or not run["long_csv"]:
+        raise HTTPException(status_code=404, detail="Run not found or not completed")
+
+    engagement = store.get_engagement(run["engagement_id"])
+    if not engagement:
+        raise HTTPException(status_code=404, detail="Engagement not found")
+
+    wide_path = Path(run["wide_csv"])
+    long_path = Path(run["long_csv"])
+    if not wide_path.exists() or not long_path.exists():
+        raise HTTPException(status_code=404, detail="CSV files not found")
+
+    try:
+        # Calculate sample size and select sample
+        df = pl.read_csv(wide_path)
+        population = len(df)
+        exception_count = sum(1 for val in df["overall_status"] if val != "OK")
+
+        sample_records = select_sample(
+            wide_path,
+            engagement_id=run["engagement_id"],
+            run_id=run_id,
+            population=population,
+            exception_count=exception_count,
+        )
+
+        # Build workpaper
+        workpaper_path = build_workpaper(
+            engagement=engagement,
+            run=run,
+            wide_csv_path=wide_path,
+            sample_records=sample_records,
+            output_dir=settings.outputs_dir / run_id,
+        )
+
+        # Update run record with workpaper path
+        store.update_run(run_id, workpaper_path=str(workpaper_path))
+
+        # Return the file
+        return FileResponse(
+            workpaper_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=workpaper_path.name,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Workpaper generation failed: {exc}") from exc
 
 
 def _now() -> str:

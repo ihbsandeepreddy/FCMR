@@ -84,9 +84,13 @@ def init_catalog() -> None:
                 error         TEXT
             )
         """)
-        # Migrate runs table to add engagement_id
+        # Migrate runs table to add engagement_id and workpaper_path
         try:
             con.execute("ALTER TABLE runs ADD COLUMN engagement_id TEXT")
+        except Exception:
+            pass  # Column already exists
+        try:
+            con.execute("ALTER TABLE runs ADD COLUMN workpaper_path TEXT")
         except Exception:
             pass  # Column already exists
 
@@ -204,7 +208,7 @@ def create_run(upload_id: str) -> str:
 
 
 def update_run(run_id: str, **kwargs: str | None) -> None:
-    allowed = {"status", "started_at", "finished_at", "wide_csv", "long_csv", "error"}
+    allowed = {"status", "started_at", "finished_at", "wide_csv", "long_csv", "error", "workpaper_path"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return
