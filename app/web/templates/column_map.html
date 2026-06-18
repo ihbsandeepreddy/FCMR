@@ -73,7 +73,7 @@
               {% if canonical_fields | selectattr("required") | list %}
               <optgroup label="Required fields">
                 {% for spec in canonical_fields %}{% if spec.required %}
-                <option value="{{ spec.canonical }}"{% if auto == spec.canonical %} selected{% endif %}>
+                <option value="{{ spec.canonical }}" data-field="{{ spec.canonical }}"{% if auto == spec.canonical %} selected{% endif %}>
                   {{ spec.canonical }} *
                 </option>
                 {% endif %}{% endfor %}
@@ -81,7 +81,7 @@
               {% endif %}
               <optgroup label="Optional fields">
                 {% for spec in canonical_fields %}{% if not spec.required %}
-                <option value="{{ spec.canonical }}"{% if auto == spec.canonical %} selected{% endif %}>
+                <option value="{{ spec.canonical }}" data-field="{{ spec.canonical }}"{% if auto == spec.canonical %} selected{% endif %}>
                   {{ spec.canonical }}
                 </option>
                 {% endif %}{% endfor %}
@@ -108,6 +108,32 @@
 </form>
 
 <script>
+function updateAllDropdowns() {
+  var allSelects = document.querySelectorAll('.col-select');
+
+  // Collect all currently selected canonical fields (non-skip)
+  var selectedFields = new Set();
+  allSelects.forEach(function(sel) {
+    if (sel.value && sel.value !== '__skip__') {
+      selectedFields.add(sel.value);
+    }
+  });
+
+  // For each dropdown, show/hide options
+  allSelects.forEach(function(sel) {
+    var currentValue = sel.value;
+    var options = sel.querySelectorAll('option[data-field]');
+
+    options.forEach(function(opt) {
+      var field = opt.getAttribute('data-field');
+      // Show if: it's the currently selected value, or it's not selected elsewhere
+      var isSelected = (field === currentValue);
+      var isUsedElsewhere = selectedFields.has(field) && !isSelected;
+      opt.style.display = isUsedElsewhere ? 'none' : '';
+    });
+  });
+}
+
 document.querySelectorAll('.col-select').forEach(function(sel) {
   function update() {
     var idx = sel.dataset.row;
@@ -122,8 +148,12 @@ document.querySelectorAll('.col-select').forEach(function(sel) {
       badge.textContent = 'Manual';
       badge.className = 'badge badge-manual status-badge-' + idx;
     }
+    updateAllDropdowns();
   }
   sel.addEventListener('change', update);
 });
+
+// Initial state
+updateAllDropdowns();
 </script>
 {% endblock %}
