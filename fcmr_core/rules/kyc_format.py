@@ -290,3 +290,29 @@ def rule_dob_validity(df: pl.DataFrame) -> pl.DataFrame:
             else:
                 statuses.append("OK"); codes.append(""); descs.append("")
     return _annotate(df, "dob_validity", statuses, codes, descs)
+
+
+@register("dob_age_range", "Age must be between 18 and 65 (inclusive)")
+def rule_dob_age_range(df: pl.DataFrame) -> pl.DataFrame:
+    series = _col_or_empty(df, "dob")
+    today = date.today()
+    statuses, codes, descs = [], [], []
+    for val in series:
+        val = (val or "").strip()
+        if not val:
+            statuses.append("OK"); codes.append(""); descs.append("")  # Missing DOB handled by dob_validity
+            continue
+        parsed = _parse_dob(val)
+        if parsed is None or parsed >= today:
+            statuses.append("OK"); codes.append(""); descs.append("")  # Invalid/future DOB handled by dob_validity
+            continue
+        age = (today - parsed).days // 365
+        if age < 18:
+            statuses.append("WARN"); codes.append("DOB_AGE_OUT_OF_RANGE")
+            descs.append(f"Age {age} years is below 18 (minimum lending age)")
+        elif age > 65:
+            statuses.append("WARN"); codes.append("DOB_AGE_OUT_OF_RANGE")
+            descs.append(f"Age {age} years is above 65 (standard retirement age)")
+        else:
+            statuses.append("OK"); codes.append(""); descs.append("")
+    return _annotate(df, "dob_age_range", statuses, codes, descs)

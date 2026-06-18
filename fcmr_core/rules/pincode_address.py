@@ -52,7 +52,7 @@ def rule_pincode_exists(df: pl.DataFrame) -> pl.DataFrame:
     return _annotate(df, "pincode_exists", statuses, codes, descs)
 
 
-@register("state_pin_match", "State vs PIN: stated state must match India Post master for the PIN")
+@register("state_pin_match", "State vs PIN: stated state must match India Post master for the PIN (if both provided)")
 def rule_state_pin_match(df: pl.DataFrame) -> pl.DataFrame:
     pins = _col_or_empty(df, "pincode")
     states = _col_or_empty(df, "state")
@@ -61,8 +61,8 @@ def rule_state_pin_match(df: pl.DataFrame) -> pl.DataFrame:
         pin = (pin or "").strip()
         stated = (stated_state or "").strip().lower()
         if not pin or not stated:
-            statuses.append("WARN"); codes.append("STATE_PIN_INCOMPLETE")
-            descs.append("Cannot validate state/PIN match: one or both values missing")
+            # Skip check if either value is missing (no flag — removed STATE_PIN_INCOMPLETE)
+            statuses.append("OK"); codes.append(""); descs.append("")
             continue
         master_state = get_state_for_pin(pin)
         if master_state is None:
@@ -79,7 +79,7 @@ def rule_state_pin_match(df: pl.DataFrame) -> pl.DataFrame:
     return _annotate(df, "state_pin_match", statuses, codes, descs)
 
 
-@register("district_pin_match", "District vs PIN: stated district/city must be consistent with India Post master")
+@register("district_pin_match", "District vs PIN: stated district/city must be consistent with India Post master (if both provided)")
 def rule_district_pin_match(df: pl.DataFrame) -> pl.DataFrame:
     pins = _col_or_empty(df, "pincode")
     districts = _col_or_empty(df, "district")
@@ -89,8 +89,8 @@ def rule_district_pin_match(df: pl.DataFrame) -> pl.DataFrame:
         pin = (pin or "").strip()
         stated = (district or city or "").strip().lower()
         if not pin or not stated:
-            statuses.append("WARN"); codes.append("DISTRICT_PIN_INCOMPLETE")
-            descs.append("Cannot validate district/PIN match: one or both values missing")
+            # Skip check if either value is missing (no flag — removed DISTRICT_PIN_INCOMPLETE)
+            statuses.append("OK"); codes.append(""); descs.append("")
             continue
         master_district = get_district_for_pin(pin)
         if master_district is None:

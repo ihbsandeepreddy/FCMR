@@ -60,7 +60,10 @@ def _ensure_rules_loaded() -> None:
     if _REGISTRY:
         return
     # Import triggers registration via @register decorators
+    from fcmr_core.rules import ucid  # noqa: F401
     from fcmr_core.rules import kyc_format  # noqa: F401
     from fcmr_core.rules import pincode_address  # noqa: F401
     from fcmr_core.rules import duplicates  # noqa: F401
+    from fcmr_core.rules import email  # noqa: F401
+    from fcmr_core.rules import bank_account  # noqa: F401
     from fcmr_core.rules import beneficiary  # noqa: F401
