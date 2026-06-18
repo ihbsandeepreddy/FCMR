@@ -12,7 +12,10 @@ from starlette.responses import RedirectResponse, Response
 from fcmr_core.catalog import store
 from fcmr_core.catalog.store import init_catalog
 from fcmr_core.config import settings
+from fcmr_core.logging_setup import get_logger
 from app.api import auth, blob_upload, downloads, engagements, runs, settings as settings_api, uploads
+
+logger = get_logger("app")
 
 
 @asynccontextmanager
@@ -21,7 +24,9 @@ async def lifespan(app: FastAPI):
     init_catalog()
     auth._ensure_admin()
     store.init_settings()
+    logger.info("Application startup: SanGir Automations ready")
     yield
+    logger.info("Application shutdown")
 
 
 app = FastAPI(

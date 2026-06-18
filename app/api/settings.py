@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 
+from fcmr_core.backup import create_backup
 from fcmr_core.catalog import store
 
 router = APIRouter()
@@ -41,3 +42,22 @@ async def update_setting(request: Request):
         name="settings.html",
         context={"settings": store.list_settings(), "message": f"✓ Setting '{key}' updated"},
     )
+
+
+@router.post("/settings/backup")
+async def backup_data(request: Request):
+    """Create and download a backup of catalog + outputs."""
+    try:
+        backup_path = create_backup()
+        return FileResponse(
+            backup_path,
+            media_type="application/zip",
+            filename=backup_path.name,
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context={"settings": store.list_settings(), "message": f"✗ Backup failed: {exc}"},
+            status_code=500,
+        )

@@ -1,0 +1,66 @@
+{
+  "name": "sangir-automations",
+  "version": "0.1.0",
+  "description": "SanGir Automations — Deterministic audit analytics for NBFC loan portfolios",
+  "author": "Sandeep Reddy <ihbsandeepreddy@gmail.com>",
+  "license": "Apache-2.0",
+  "main": "electron/main.js",
+  "homepage": "./",
+  "scripts": {
+    "start": "electron .",
+    "build:backend": "pyinstaller build/sangir-backend.spec",
+    "build:frontend": "echo 'No frontend build needed (server-rendered)'",
+    "dist": "electron-builder",
+    "dev": "concurrently \"npm start\" \"python -m uvicorn app.main:app --port 8000\"",
+    "lint": "ruff check .",
+    "format": "black .",
+    "test": "pytest -m 'not perf' -v"
+  },
+  "dependencies": {
+    "electron-updater": "^7.0.0",
+    "axios": "^1.7.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^25.0.0",
+    "concurrently": "^8.0.0"
+  },
+  "build": {
+    "appId": "com.sangir.automations",
+    "productName": "SanGir Automations",
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "!electron/node_modules/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/sangir-backend",
+        "to": "sangir-backend",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "certificateFile": null,
+      "certificatePassword": null,
+      "signingHashAlgorithms": ["sha256"],
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SanGir Automations"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ihbsandeepreddy",
+      "repo": "sangir-releases",
+      "protocol": "https"
+    }
+  }
+}

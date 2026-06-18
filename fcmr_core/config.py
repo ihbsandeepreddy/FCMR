@@ -1,25 +1,30 @@
 import os
 import secrets
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # On Vercel the filesystem is read-only except /tmp
 _ON_VERCEL = bool(os.environ.get("VERCEL"))
-_DATA_ROOT = Path("/tmp/fcmr") if _ON_VERCEL else Path(__file__).resolve().parent.parent / "data"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FCMR_", env_file=".env", extra="ignore")
 
-    # Root paths
+    # Root paths — frozen-aware (PyInstaller bundles are read-only; use per-user dir)
     base_dir: Path = Path(__file__).resolve().parent.parent
-    data_dir: Path = _DATA_ROOT
-    uploads_dir: Path = _DATA_ROOT / "uploads"
-    parquet_dir: Path = _DATA_ROOT / "parquet"
-    outputs_dir: Path = _DATA_ROOT / "outputs"
+    data_dir: Path = ""  # Set in __init__
+    uploads_dir: Path = ""  # Set in __init__
+    parquet_dir: Path = ""  # Set in __init__
+    outputs_dir: Path = ""  # Set in __init__
+    logs_dir: Path = ""  # Set in __init__
+    backups_dir: Path = ""  # Set in __init__
     reference_dir: Path = Path(__file__).resolve().parent / "reference"
     schemas_dir: Path = Path(__file__).resolve().parent / "schemas"
-    catalog_path: Path = _DATA_ROOT / "catalog.duckdb"
+    catalog_path: Path = ""  # Set in __init__
+
+    # Backend and networking
+    backend_port: int = 8000
 
     # Ingest tuning — keep chunk size low enough to stay inside 15 GB RAM when
     # processing 5M-row CSVs with many wide columns.
@@ -37,6 +42,30 @@ class Settings(BaseSettings):
 
     def __init__(self, **data):
         super().__init__(**data)
+
+        # Resolve data_dir based on deployment environment
+        if _ON_VERCEL:
+            # On Vercel the filesystem is read-only except /tmp
+            data_root = Path("/tmp/fcmr")
+        elif getattr(sys, "frozen", False):
+            # Running as PyInstaller bundle — use per-user appdata path
+            if sys.platform == "win32":
+                data_root = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "SanGirAutomations"
+            else:
+                data_root = Path.home() / ".sangir"
+        else:
+            # Dev mode — use repo-relative data/ directory
+            data_root = self.base_dir / "data"
+
+        self.data_dir = data_root
+        self.uploads_dir = self.data_dir / "uploads"
+        self.parquet_dir = self.data_dir / "parquet"
+        self.outputs_dir = self.data_dir / "outputs"
+        self.logs_dir = self.data_dir / "logs"
+        self.backups_dir = self.data_dir / "backups"
+        self.catalog_path = self.data_dir / "catalog.duckdb"
+
+        # If session_secret is not provided, load from or generate one in data/
         if not self.session_secret:
             if _ON_VERCEL:
                 # On Vercel each container is stateless — secret MUST be fixed via env var
@@ -57,7 +86,7 @@ class Settings(BaseSettings):
                     secret_file.write_text(self.session_secret)
 
     def ensure_dirs(self) -> None:
-        for d in (self.uploads_dir, self.parquet_dir, self.outputs_dir):
+        for d in (self.uploads_dir, self.parquet_dir, self.outputs_dir, self.logs_dir, self.backups_dir):
             d.mkdir(parents=True, exist_ok=True)
 
 

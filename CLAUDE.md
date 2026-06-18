@@ -495,8 +495,28 @@ Each test uses curated fixtures (valid/invalid values, edge cases).
 
 ---
 
+## Desktop Packaging & Updates (Phase 7+)
+
+The app can be deployed as a standalone Windows desktop application via:
+
+- **PyInstaller** freezes the Python backend into a standalone `.exe` (no Python runtime required)
+- **Electron** wraps the FastAPI backend and opens it in a BrowserWindow
+- **electron-updater** checks a public GitHub releases repo for new versions
+- **GitHub Actions** automates builds and releases on version tags (`v*.*.*`)
+
+For details on building, releasing, and distributing the desktop app, see:
+
+- `docs/RELEASE_PROCESS.md` — Release workflow and setup
+- `docs/USER_GUIDE.md` — End-user documentation
+- `docs/INFRASTRUCTURE.md` — Full desktop & infrastructure specification
+- `.github/workflows/release.yml` — Automated build-and-release CI
+
+The web app (FastAPI + Jinja2) remains unchanged; the desktop shell simply wraps it.
+
+---
+
 ## License & Attribution
 
-This product was built as Phase 0–6 of SanGir Automations by Sandeep Reddy (ihbsandeepreddy@gmail.com) with Claude Code assistance.
+This product was built as Phase 0–6 of SanGir Automations (audit core), with Phase 7+ desktop infrastructure by Sandeep Reddy (ihbsandeepreddy@gmail.com) with Claude Code assistance.
 
 **Last updated:** 2026-06-18

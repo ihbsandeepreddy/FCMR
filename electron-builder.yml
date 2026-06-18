@@ -1,0 +1,37 @@
+appId: com.sangir.automations
+productName: SanGir Automations
+
+directories:
+  buildResources: build
+
+files:
+  - electron/**/*
+  - "!electron/node_modules/*"
+
+extraResources:
+  - from: dist/sangir-backend
+    to: sangir-backend
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - nsis
+  certificateFile: null
+  certificatePassword: null
+  signingHashAlgorithms:
+    - sha256
+  sign: null
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SanGir Automations
+
+publish:
+  provider: github
+  owner: ihbsandeepreddy
+  repo: sangir-releases
+  protocol: https

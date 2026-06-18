@@ -23,6 +23,14 @@ data/
 # Env / secrets
 .env
 .env.*
+# But DO commit example templates
+!.env.example
+!.env.production.example
+
+# Node / Electron
+node_modules/
+dist/
+electron/node_modules/
 
 # IDEs
 .vscode/

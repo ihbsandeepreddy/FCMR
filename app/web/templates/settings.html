@@ -47,6 +47,25 @@
     </ul>
   </div>
 
+  <div class="card">
+    <div class="card-title">Data Backup</div>
+    <div class="card-sub">Download a backup of your catalog and generated reports</div>
+
+    <form method="POST" action="/settings/backup" style="display:inline;">
+      <button type="submit" class="btn btn-ghost">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <path d="M6 1V8M3 5.5L6 8L9 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="1" y="10" width="14" height="5" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+        </svg>
+        Download Backup
+      </button>
+    </form>
+    <p class="help-text" style="margin-top:8px; font-size:12.5px;">
+      Creates a ZIP file with your catalog database and all generated reports.
+      Store backups safely for data recovery.
+    </p>
+  </div>
+
 </div>
 
 <script>
