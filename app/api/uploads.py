@@ -123,11 +123,14 @@ async def do_upload(
                 engagement_id=engagement_id,
             )
 
-            # Store CSV to disk
+            # Stream write in 256 KB chunks — avoids holding full file in RAM
             dest_dir = settings.uploads_dir / upload_id
             dest_dir.mkdir(parents=True, exist_ok=True)
             csv_path = dest_dir / filename
-            csv_path.write_bytes(content)
+            chunk_size = 256 * 1024
+            with csv_path.open("wb") as out:
+                for i in range(0, len(content), chunk_size):
+                    out.write(content[i : i + chunk_size])
 
             # Sniff headers and set mapping_pending
             headers = sniff_headers(csv_path)
