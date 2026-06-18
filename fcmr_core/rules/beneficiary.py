@@ -1,4 +1,4 @@
-"""Beneficiary tagging and stable internal customer ID creation.
+﻿"""Beneficiary tagging and stable internal customer ID creation.
 
 Logic:
   - A stable internal key (fcmr_customer_key) is derived deterministically
@@ -20,7 +20,7 @@ from fcmr_core.rules.registry import register
 
 def _col_or_empty(df: pl.DataFrame, col: str) -> pl.Series:
     if col in df.columns:
-        return df[col].fill_null("").cast(pl.Utf8)
+        return df[col].cast(pl.Utf8, strict=False).fill_null("")
     return pl.Series(col, [""] * len(df), dtype=pl.Utf8)
 
 
@@ -50,7 +50,7 @@ def rule_beneficiary_tagging(df: pl.DataFrame) -> pl.DataFrame:
         pan_norm = (pan or "").strip().upper()
         aadh_hash = _hash_aadhaar(aadh_raw)
         mob_norm = (mob or "").strip().replace(" ", "").replace("-", "")
-        name_dob = (name.strip().upper() + "|" + dob.strip()) if name.strip() and dob.strip() else ""
+        name_dob = ((name or "").strip().upper() + "|" + (dob or "").strip()) if (name or "").strip() and (dob or "").strip() else ""
 
         # Stable customer key: best available identifier (priority: PAN > Aadhaar > mobile > name+DOB)
         if pan_norm and len(pan_norm) == 10:

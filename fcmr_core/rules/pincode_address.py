@@ -1,4 +1,4 @@
-"""PIN-code authentication and address validation rules.
+﻿"""PIN-code authentication and address validation rules.
 
 Checks:
   1. PIN exists in the bundled India Post master (6-digit format + real code)
@@ -21,7 +21,7 @@ _PIN_RE = re.compile(r"^\d{6}$")
 
 def _col_or_empty(df: pl.DataFrame, col: str) -> pl.Series:
     if col in df.columns:
-        return df[col].fill_null("").cast(pl.Utf8)
+        return df[col].cast(pl.Utf8, strict=False).fill_null("")
     return pl.Series(col, [""] * len(df), dtype=pl.Utf8)
 
 
@@ -61,12 +61,12 @@ def rule_state_pin_match(df: pl.DataFrame) -> pl.DataFrame:
         pin = (pin or "").strip()
         stated = (stated_state or "").strip().lower()
         if not pin or not stated:
-            # Skip check if either value is missing (no flag — removed STATE_PIN_INCOMPLETE)
+            # Skip check if either value is missing (no flag â€” removed STATE_PIN_INCOMPLETE)
             statuses.append("OK"); codes.append(""); descs.append("")
             continue
         master_state = get_state_for_pin(pin)
         if master_state is None:
-            # PIN unknown — already flagged by pincode_exists; skip double-reporting
+            # PIN unknown â€” already flagged by pincode_exists; skip double-reporting
             statuses.append("OK"); codes.append(""); descs.append("")
         elif master_state != stated:
             statuses.append("ERROR"); codes.append("STATE_PIN_MISMATCH")
@@ -89,7 +89,7 @@ def rule_district_pin_match(df: pl.DataFrame) -> pl.DataFrame:
         pin = (pin or "").strip()
         stated = (district or city or "").strip().lower()
         if not pin or not stated:
-            # Skip check if either value is missing (no flag — removed DISTRICT_PIN_INCOMPLETE)
+            # Skip check if either value is missing (no flag â€” removed DISTRICT_PIN_INCOMPLETE)
             statuses.append("OK"); codes.append(""); descs.append("")
             continue
         master_district = get_district_for_pin(pin)
@@ -112,7 +112,7 @@ def rule_address_completeness(df: pl.DataFrame) -> pl.DataFrame:
     series_map = {col: _col_or_empty(df, col) for col in required}
     statuses, codes, descs = [], [], []
     for i in range(len(df)):
-        missing = [col for col in required if not series_map[col][i].strip()]
+        missing = [col for col in required if not (series_map[col][i] or "").strip()]
         if missing:
             statuses.append("WARN"); codes.append("ADDRESS_INCOMPLETE")
             descs.append(f"Address fields missing: {', '.join(missing)}")

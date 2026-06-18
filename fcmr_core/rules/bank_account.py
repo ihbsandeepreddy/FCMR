@@ -1,4 +1,4 @@
-"""Bank account validation rules.
+﻿"""Bank account validation rules.
 
 Checks:
   1. Bank account length (valid range: 9-18 digits)
@@ -13,7 +13,7 @@ from fcmr_core.rules.registry import register
 
 def _col_or_empty(df: pl.DataFrame, col: str) -> pl.Series:
     if col in df.columns:
-        return df[col].fill_null("").cast(pl.Utf8)
+        return df[col].cast(pl.Utf8, strict=False).fill_null("")
     return pl.Series(col, [""] * len(df), dtype=pl.Utf8)
 
 

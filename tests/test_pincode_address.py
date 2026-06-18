@@ -52,8 +52,9 @@ class TestStatePinMatch:
         assert _code(df, "state_pin_match") == "STATE_PIN_MISMATCH"
 
     def test_missing_state(self):
+        # Missing state is skipped here (address_completeness handles it); no double-flag.
         df = rule_state_pin_match(_df(pincode="110001", state=""))
-        assert _status(df, "state_pin_match") == "WARN"
+        assert _status(df, "state_pin_match") == "OK"
 
     def test_known_pin_karnataka(self):
         df = rule_state_pin_match(_df(pincode="560001", state="karnataka"))

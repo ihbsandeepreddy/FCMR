@@ -101,6 +101,12 @@ def _run_analytics(run_id: str, upload_id: str) -> None:
                     "Please re-upload the CSV file."
                 )
             df = read_parquet(parquet_path).collect()
+
+        # Cast every column to string. DuckDB infers numeric-looking fields
+        # (mobile, pincode, bank_account) as Int64; all rules expect str values.
+        df = df.with_columns([
+            pl.col(c).cast(pl.Utf8, strict=False) for c in df.columns
+        ])
         logger.info("job_loaded run_id=%s rows=%d", run_id, len(df))
 
         if _step("Running 27 validation rules"): return

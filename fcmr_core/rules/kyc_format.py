@@ -1,16 +1,16 @@
-"""KYC document format validation rules.
+﻿"""KYC document format validation rules.
 
-All logic is deterministic, hard-coded Python — no AI/LLM dependency.
+All logic is deterministic, hard-coded Python â€” no AI/LLM dependency.
 
 Covered:
-  PAN       — AAAAA9999A format + 4th-char entity type
-  Aadhaar   — 12 digits + Verhoeff checksum; masked in output
-  Voter ID  — EPIC format ^[A-Z]{3}[0-9]{7}$
-  Passport  — ^[A-PR-WY][0-9]{7}$
-  DL        — State code prefix + structural pattern
-  Mobile    — 10-digit starting 6-9
-  Email     — RFC-style basic format check
-  DOB       — Valid date + age in plausible range (1 – 100 years)
+  PAN       â€” AAAAA9999A format + 4th-char entity type
+  Aadhaar   â€” 12 digits + Verhoeff checksum; masked in output
+  Voter ID  â€” EPIC format ^[A-Z]{3}[0-9]{7}$
+  Passport  â€” ^[A-PR-WY][0-9]{7}$
+  DL        â€” State code prefix + structural pattern
+  Mobile    â€” 10-digit starting 6-9
+  Email     â€” RFC-style basic format check
+  DOB       â€” Valid date + age in plausible range (1 â€“ 100 years)
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _annotate(df: pl.DataFrame, rule_id: str, statuses: list[str], codes: list[s
 
 def _col_or_empty(df: pl.DataFrame, col: str) -> pl.Series:
     if col in df.columns:
-        return df[col].fill_null("").cast(pl.Utf8)
+        return df[col].cast(pl.Utf8, strict=False).fill_null("")
     return pl.Series(col, [""] * len(df), dtype=pl.Utf8)
 
 
@@ -262,7 +262,7 @@ def rule_email_format(df: pl.DataFrame) -> pl.DataFrame:
 # Date of Birth
 # ---------------------------------------------------------------------------
 
-@register("dob_validity", "Date of birth: valid date, age 1–100 years")
+@register("dob_validity", "Date of birth: valid date, age 1â€“100 years")
 def rule_dob_validity(df: pl.DataFrame) -> pl.DataFrame:
     series = _col_or_empty(df, "dob")
     today = date.today()

@@ -1,4 +1,4 @@
-"""Duplicate detection rules using DuckDB for cross-row self-joins.
+﻿"""Duplicate detection rules using DuckDB for cross-row self-joins.
 
 Checks (all deterministic, no fuzzy matching):
   1. Shared PAN across different customer_ids (flagged unless same UCID + different LANs)
@@ -6,7 +6,7 @@ Checks (all deterministic, no fuzzy matching):
   3. Shared mobile number across different customer_ids (flagged unless same UCID + different LANs)
   4. Shared bank account number across different customer_ids (flagged unless same UCID + different LANs)
   5. Shared Voter ID across different customer_ids (flagged unless same UCID + different LANs)
-  6. Address fuzzy match (token-set Jaccard ≥0.85) across different customer_ids
+  6. Address fuzzy match (token-set Jaccard â‰¥0.85) across different customer_ids
   7. Exact name+DOB match (normalised) across different customer_ids
 
 UCID scoping: A duplicate within the same UCID is OK only if rows have distinct LANs.
@@ -25,7 +25,7 @@ from fcmr_core.rules.registry import register
 
 def _col_or_empty(df: pl.DataFrame, col: str) -> pl.Series:
     if col in df.columns:
-        return df[col].fill_null("").cast(pl.Utf8)
+        return df[col].cast(pl.Utf8, strict=False).fill_null("")
     return pl.Series(col, [""] * len(df), dtype=pl.Utf8)
 
 
@@ -202,7 +202,7 @@ def rule_mobile_duplicate(df: pl.DataFrame) -> pl.DataFrame:
     ucids = _col_or_empty(df, "ucid") if "ucid" in df.columns else pl.Series("ucid", [""] * len(df))
     lans = _col_or_empty(df, "lan") if "lan" in df.columns else pl.Series("lan", [""] * len(df))
 
-    norm_mobiles = pl.Series([m.strip().replace(" ", "").replace("-", "") for m in mobiles])
+    norm_mobiles = pl.Series([(m or "").strip().replace(" ", "").replace("-", "") for m in mobiles])
 
     work_data = {"customer_id": cids, "_mobile_norm": norm_mobiles}
     if "ucid" in df.columns:
@@ -267,7 +267,7 @@ def rule_name_dob_duplicate(df: pl.DataFrame) -> pl.DataFrame:
     lans = _col_or_empty(df, "lan") if "lan" in df.columns else pl.Series("lan", [""] * len(df))
 
     keys = [
-        (n.strip().upper() + "|" + d.strip()) if (n.strip() and d.strip()) else ""
+        ((n or "").strip().upper() + "|" + (d or "").strip()) if ((n or "").strip() and (d or "").strip()) else ""
         for n, d in zip(names, dobs)
     ]
 
@@ -304,7 +304,7 @@ def rule_voter_id_duplicate(df: pl.DataFrame) -> pl.DataFrame:
     ucids = _col_or_empty(df, "ucid") if "ucid" in df.columns else pl.Series("ucid", [""] * len(df))
     lans = _col_or_empty(df, "lan") if "lan" in df.columns else pl.Series("lan", [""] * len(df))
 
-    norm_vids = pl.Series([v.strip().upper() for v in vids])
+    norm_vids = pl.Series([(v or "").strip().upper() for v in vids])
 
     work_data = {"customer_id": cids, "_voter_id": norm_vids}
     if "ucid" in df.columns:
@@ -329,7 +329,7 @@ def rule_voter_id_duplicate(df: pl.DataFrame) -> pl.DataFrame:
     return _annotate(df, "voter_id_duplicate", statuses, codes, descs)
 
 
-@register("address_duplicate", "Fuzzy address match (token-set Jaccard ≥0.85) across different customer IDs")
+@register("address_duplicate", "Fuzzy address match (token-set Jaccard â‰¥0.85) across different customer IDs")
 def rule_address_duplicate(df: pl.DataFrame) -> pl.DataFrame:
     """Flag addresses that are fuzzy-similar (not exact duplicates)."""
     addrs = _col_or_empty(df, "address_line1")
@@ -350,7 +350,7 @@ def rule_address_duplicate(df: pl.DataFrame) -> pl.DataFrame:
                 if other_addr and _address_similarity(addr, other_addr) >= 0.85:
                     found_match = True
                     statuses.append("WARN"); codes.append("ADDRESS_DUPLICATE")
-                    descs.append(f"Address is fuzzy-similar to another record (similarity ≥85%)")
+                    descs.append(f"Address is fuzzy-similar to another record (similarity â‰¥85%)")
                     break
 
         if not found_match:
