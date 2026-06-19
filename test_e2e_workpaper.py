@@ -5,15 +5,15 @@ import csv
 import tempfile
 from pathlib import Path
 
-import pytest
 import polars as pl
+import pytest
 
 from fcmr_core.ingestion.pipeline import ingest_csv
-from fcmr_core.rules.registry import run_pipeline
-from fcmr_core.reporting.builder import build_exception_csvs
 from fcmr_core.reporting.aggregation import aggregate_exception_codes
-from fcmr_core.sampling.sample import select_sample
+from fcmr_core.reporting.builder import build_exception_csvs
 from fcmr_core.reporting.workpaper import build_workpaper
+from fcmr_core.rules.registry import run_pipeline
+from fcmr_core.sampling.sample import select_sample
 
 
 def create_sample_csv(path: Path, rows: int = 100) -> None:
@@ -81,7 +81,9 @@ def test_full_pipeline():
         result = ingest_csv(csv_path, report_type="customer_master")
         parquet_path = result.parquet_path
         row_count = result.total_rows
-        print(f"  {row_count} rows ingested ({result.accepted_rows} accepted, {result.rejected_rows} rejected)")
+        print(
+            f"  {row_count} rows ingested ({result.accepted_rows} accepted, {result.rejected_rows} rejected)"
+        )
 
         # Step 3: Load Parquet and run rules
         print("[OK]Running 27-rule pipeline...")
@@ -102,8 +104,12 @@ def test_full_pipeline():
         assert "bank_account" in wide_df.columns, "bank_account column missing from wide CSV"
         assert "overall_status" in wide_df.columns, "overall_status column missing from wide CSV"
         accounts = wide_df["bank_account"].to_list()
-        assert any("120324101240313000155" in str(acc) for acc in accounts), "Missing long account number"
-        print(f"  [PASS] 21-digit bank account preserved: {[a for a in accounts if '1203' in str(a)][0]}")
+        assert any(
+            "120324101240313000155" in str(acc) for acc in accounts
+        ), "Missing long account number"
+        print(
+            f"  [PASS] 21-digit bank account preserved: {[a for a in accounts if '1203' in str(a)][0]}"
+        )
 
         # Step 6: Test aggregation
         print("[OK]Aggregating exception codes...")
@@ -150,7 +156,9 @@ def test_full_pipeline():
         sheet_names = wb.sheetnames
         print(f"  Sheets: {sheet_names}")
         expected_sheets = ["Lead Sheet", "Detailed Exceptions", "TOC and TOD", "Methodology"]
-        assert sheet_names == expected_sheets, f"Sheet names mismatch: {sheet_names} vs {expected_sheets}"
+        assert (
+            sheet_names == expected_sheets
+        ), f"Sheet names mismatch: {sheet_names} vs {expected_sheets}"
 
         # Check Lead Sheet has content
         ws_lead = wb["Lead Sheet"]
@@ -177,7 +185,7 @@ def test_full_pipeline():
         print(f"\n[OUTPUT] Outputs in: {output_dir}")
         print(f"   - wide.csv: {len(wide_df)} records")
         print(f"   - long.csv: {len(long_df)} exceptions")
-        print(f"   - workpaper.xlsx: 4 sheets")
+        print("   - workpaper.xlsx: 4 sheets")
 
 
 if __name__ == "__main__":
