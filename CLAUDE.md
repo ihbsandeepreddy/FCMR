@@ -6,7 +6,7 @@
 > When code and this document disagree, treat it as a bug in one of them and reconcile
 > immediately (update the code or update this doc in the same change).
 >
-> **Last reconciled with code:** 2026-06-19 (full codebase read).
+> **Last reconciled with code:** 2026-06-19 (merged upstream v0.1.23; full feature audit).
 > Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
 
 ---
@@ -65,21 +65,21 @@ the rule pipeline only produces meaningful results for `customer_master`.
 
 ### 1.5 Deployment reality (important)
 
-The app runs in **two** environments, auto-detected via the `VERCEL` env var in
-`fcmr_core/config.py`:
+The app detects its deployment environment in `fcmr_core/config.py` via `sys.frozen` (PyInstaller)
+and the `VERCEL` env var. Three environments:
 
-| | **Local / desktop (primary)** | **Vercel serverless (secondary)** |
-|---|---|---|
-| Data root | `<repo>/data/` (persistent) | `/tmp/fcmr/` (**ephemeral** — wiped on cold start) |
-| Catalog | `data/catalog.duckdb` survives restarts | `/tmp/fcmr/catalog.duckdb` **does not survive** between cold starts |
-| Large uploads | streamed to disk in 256 KB chunks | direct browser→**Vercel Blob** (4.5 MB function-body limit) |
-| Session secret | auto-generated, saved to `data/.session_secret` | **must** set `FCMR_SESSION_SECRET` env var (else startup raises) |
-| Use case | real audit work, data retention | demos / preview only |
+| | **Dev (uvicorn)** | **Desktop (Electron+PyInstaller)** | **Vercel serverless** |
+|---|---|---|---|
+| Data root | `<repo>/data/` | Windows: `%LOCALAPPDATA%/SanGirAutomations`; others: `~/.sangir` | `/tmp/fcmr/` (**ephemeral**) |
+| Catalog | `data/catalog.duckdb` | per-user appdata, persistent | `/tmp/fcmr/catalog.duckdb` wiped on cold start |
+| Large uploads | streamed to disk | streamed to disk | direct browser→**Vercel Blob** (4.5 MB limit) |
+| Session secret | auto-gen → `data/.session_secret` | auto-gen → appdata | **must** set `FCMR_SESSION_SECRET` (else startup raises) |
+| DuckDB limits | tier-auto-detected (`apply_duckdb_limits`) | tier-auto-detected | tier-auto-detected |
+| Use case | development | real audit work, offline-capable | demos / preview only |
 
-> ⚠️ **Invariant #4 (data survival) only holds locally.** On Vercel the catalog lives in
-> `/tmp` and is effectively a throwaway. Do not treat Vercel as a system of record. This
-> directly contradicts the old docs that said "Vercel not supported" — Vercel *is* wired up,
-> but only for ephemeral/demo use.
+> ⚠️ **Data survival (invariant #4) only holds on dev and desktop.** On Vercel the catalog is
+> a throwaway. The desktop build is the primary durable deployment path — it uses per-user
+> appdata so no admin rights are needed.
 
 ---
 
@@ -99,6 +99,9 @@ The app runs in **two** environments, auto-detected via the `VERCEL` env var in
 | Charts | hand-rolled SVG (`reporting/charts.py`) | zero chart deps, inline-safe |
 | Config | pydantic-settings | env-prefixed `FCMR_*`, `.env` support |
 | Auth | PBKDF2-HMAC-SHA256 (100k iters) + signed-cookie sessions | stdlib only |
+| Logging | Python `logging` + `RotatingFileHandler` via `logging_setup.py` | 4 dedicated log files, no PII |
+| System monitoring | `psutil` + `/api/system/*` JSON endpoints | RAM/CPU/DuckDB state; feeds Settings page |
+| Desktop shell | Electron (Node.js) + PyInstaller (.exe/.app) | wraps FastAPI backend; auto-update via GitHub Releases |
 
 Full dependency list: `pyproject.toml` (canonical) and `requirements.txt` (Vercel runtime —
 note it currently **omits** `openpyxl` and `pyarrow`; see §18 known issues).
@@ -110,6 +113,7 @@ note it currently **omits** `openpyxl` and `pyarrow`; see §18 known issues).
 ```
 FCMR/
 ├── api/index.py                  Vercel entry — re-exports app.main:app
+├── desktop_backend.py            PyInstaller entry — imports app and runs uvicorn directly
 ├── app/                          FastAPI web layer (thin)
 │   ├── main.py                   App factory, lifespan init, middleware, router wiring
 │   ├── api/
@@ -118,7 +122,8 @@ FCMR/
 │   │   ├── uploads.py            Upload + column-mapping UI + dashboard ("/dashboard")
 │   │   ├── runs.py               Run analytics (background task), charts, workpaper export
 │   │   ├── downloads.py          Wide/long CSV download
-│   │   ├── settings.py           Settings page (fuzzy threshold)
+│   │   ├── settings.py           Settings page (fuzzy threshold + system monitoring)
+│   │   ├── system.py             /api/system/info|usage|logs — JSON endpoints (psutil)
 │   │   ├── blob_upload.py        Vercel Blob token + register-from-blob (large files)
 │   │   └── ead_consolidate.py    EAD multi-file merge + CSV/Excel download
 │   └── web/
@@ -128,7 +133,9 @@ FCMR/
 │       └── static/css/main.css   The entire design system (see §16)
 │
 ├── fcmr_core/                    Business logic (UI-independent, testable)
-│   ├── config.py                 Settings (paths, Vercel detection, secrets, thresholds)
+│   ├── config.py                 Settings (paths, env detection, DuckDB limits, secrets)
+│   ├── logging_setup.py          get_logger() → 4 rotating files (app/processing/error/update)
+│   ├── backup.py                 create_backup() / restore_backup() → data/backups/
 │   ├── catalog/store.py          DuckDB: catalog tables + row-data tables + CRUD + migrations
 │   ├── ingestion/pipeline.py     CSV → Parquet (DuckDB streaming), header sniff, rejects
 │   ├── schemas/                  Column-mapping YAMLs + loader (confidence scoring)
@@ -136,8 +143,9 @@ FCMR/
 │   │   ├── ead_files.yaml        39 canonical ECL/EAD fields (L&T Finance LMS names)
 │   │   ├── collection_report.yaml / disbursement_report.yaml / technical_writeoff.yaml
 │   │   └── loader.py             SchemaMap, alias index, difflib scoring, threshold
-│   ├── rules/                    24 deterministic rules (see §11)
-│   │   ├── registry.py           @register decorator, run_pipeline(), _coerce_str_columns()
+│   ├── rules/                    24 deterministic rules grouped into 4 categories (see §6)
+│   │   ├── registry.py           @register, CATEGORIES, run_pipeline(), list_categories(),
+│   │   │                          resolve_rule_ids(), _coerce_str_columns()
 │   │   ├── ucid.py               Union-find grouping + KYC-consistency flag
 │   │   ├── kyc_format.py         PAN/Aadhaar(Verhoeff)/Voter/Passport/DL/Mobile/Email/DOB
 │   │   ├── duplicates.py         PAN/Aadhaar/Mobile/Bank/VoterID/Name+DOB/Address dupes
@@ -156,13 +164,26 @@ FCMR/
 │   │   └── sample.py             Seeded proportional stratified selection
 │   └── reference/pin_master.py   India Post PIN master (Parquet, lru_cached)
 │
-├── tests/                        pytest: kyc_format, duplicates, ingestion, pincode_address
+├── electron/                     Electron shell (desktop app)
+│   ├── main.js                   Main process: spawn backend, auto-port, 90s timeout, log file
+│   ├── preload.js                Context bridge (renderer ↔ main)
+│   └── updater.js                Auto-update via electron-updater + GitHub Releases
+├── build/
+│   ├── sangir-backend.spec       PyInstaller spec — bundles Python + fcmr_core into .exe
+│   └── installer.nsh             NSIS installer customisation (Windows)
+├── package.json                  Electron + electron-builder (desktop build)
+├── electron-builder.yml          Build targets (Windows NSIS, macOS dmg, Linux AppImage)
+│
+├── tests/                        pytest: kyc_format, duplicates, ingestion, pincode_address,
+│                                  categories (run_pipeline filtering), e2e workpaper
 ├── pyproject.toml                deps, ruff, black, pytest config
 ├── requirements.txt              Vercel runtime deps (subset — see §18)
 ├── vercel.json                   builds api/index.py, routes /* → it
 ├── start.bat                     one-click local: venv → git pull → uvicorn --reload :8000
-├── .github/workflows/ci.yml      ruff + black --check + pytest (py3.13)
-└── .claude/launch.json           dev launcher on :8001
+├── .env.example                  template for local dev vars
+├── .env.production.example       template for Vercel/prod vars
+└── .github/workflows/ci.yml      ruff + black --check + pytest (py3.13)
+      .github/workflows/release.yml  build + publish Electron installers on git tag
 ```
 
 ### Request → data flow (customer_master analytics)
@@ -260,12 +281,27 @@ reload) → it appears in the upload dropdown automatically. If it needs analyti
 
 **Mechanism (`rules/registry.py`):**
 - A rule is `fn(df: pl.DataFrame) -> pl.DataFrame` registered via `@register(rule_id, description)`.
-- `run_pipeline(df)` first calls `_coerce_str_columns()` (casts numeric-inferred columns —
-  except a known numeric allowlist — to `Utf8`, so `.strip()` in rules never hits an `int`),
-  then runs every registered rule in registration order.
+- `run_pipeline(df, rule_ids=None, on_progress=None)`:
+  - First calls `_coerce_str_columns()` (casts numeric-inferred columns — except the
+    `_NUMERIC_CANONICALS` allowlist — to `Utf8`, so `.strip()` in rules never hits an `int`).
+  - If `rule_ids` is provided, runs only those rules (preserving registry order); `None` = all.
+  - Calls `on_progress(completed, total, rule_id)` after each rule (used by Settings UI to
+    display progress during selective runs).
 - Each rule appends three columns: `_exc_<rule_id>_status` ("OK"|"WARN"|"ERROR"),
   `_exc_<rule_id>_code`, `_exc_<rule_id>_desc`. `reporting/builder.py` collapses these.
 - Rules are loaded once on first run via `_ensure_rules_loaded()` (import side effects).
+
+**Rule categories** — the 24 rules are grouped into 4 categories (defined in `CATEGORIES`
+in `registry.py`). Users can run a whole category or individual rules from the run UI:
+
+| Category id | Label | Rule ids (count) |
+|---|---|---|
+| `kyc_format` | KYC & Document Format | pan_format, aadhaar_format, voter_id_format, passport_format, dl_format, mobile_format, email_format, dob_validity, dob_age_range, bank_account_invalid_length, email_company_generic_domain **(11)** |
+| `address_pin` | Address & PIN | pincode_exists, state_pin_match, district_pin_match, address_completeness **(4)** |
+| `duplicates` | Duplicate Detection | pan_duplicate, aadhaar_duplicate, mobile_duplicate, bank_account_duplicate, name_dob_duplicate, voter_id_duplicate, address_duplicate **(7)** |
+| `identity_grouping` | Identity Grouping | ucid, beneficiary_tagging **(2)** |
+
+`list_categories()` returns these enriched with descriptions. `resolve_rule_ids(category_ids, rule_ids)` merges category selection with individual rule selection → a flat list; returns `None` (= run all) when both are empty.
 
 **The 24 registered rules** (count is authoritative — older docs said 27):
 
@@ -366,44 +402,121 @@ All env vars are prefixed `FCMR_` (pydantic-settings), `.env` supported. Defined
 |---|---|---|
 | `FCMR_AADHAAR_HASH_SALT` | placeholder | **Set in prod.** Salt for Aadhaar hashing. |
 | `FCMR_SESSION_SECRET` | auto (local) | **Required on Vercel** (else startup error); local auto-saves to `data/.session_secret`. |
-| `FCMR_FUZZY_MATCH_THRESHOLD` | `0.6` | Also editable live at `/settings` (stored in `settings` table, which overrides the default at mapping time). |
+| `FCMR_FUZZY_MATCH_THRESHOLD` | `0.6` | Also editable live at `/settings` (stored in `settings` table, overrides default). |
 | `FCMR_INGEST_CHUNK_ROWS` | `100000` | streaming chunk hint |
 | `FCMR_MAX_UPLOAD_BYTES` | `2 GB` | per-file hard limit |
-| `BLOB_READ_WRITE_TOKEN` | — | Vercel Blob (not `FCMR_`-prefixed; read directly). Enables large-file path. |
+| `FCMR_HW_TIER` | auto-detect | Override hardware tier: `low` (<12 GB RAM) / `mid` (12–24 GB) / `high` (>24 GB). Controls DuckDB memory/thread limits. |
+| `FCMR_DUCKDB_MEMORY_LIMIT` | tier-derived | e.g. `"6GB"`. Override if auto-detect gives wrong limit. |
+| `FCMR_DUCKDB_THREADS` | tier-derived | Override DuckDB thread count. |
+| `FCMR_BACKEND_PORT` | `8000` | Port for uvicorn; Electron sets this to `8765` by default. |
+| `BLOB_READ_WRITE_TOKEN` | — | Vercel Blob (not `FCMR_`-prefixed). Enables large-file path. |
 | `VERCEL` | set by Vercel | switches data root to `/tmp/fcmr`. |
+
+**Hardware-tier DuckDB limits** (`apply_duckdb_limits(con)` in `config.py`): call this
+immediately after opening any DuckDB connection that runs analytics. Sets `memory_limit`,
+`threads`, and `temp_directory` (for disk spill at `data/duckdb_spill/`). Tier defaults:
+- `low` (<12 GB RAM): 3 GB DuckDB memory, 2 threads
+- `mid` (12–24 GB): 6 GB, 4 threads
+- `high` (>24 GB): 12 GB, 6 threads
 
 ---
 
 ## 12. Testing & CI
 
 - **Tests present:** `tests/test_kyc_format.py`, `test_duplicates.py`, `test_ingestion.py`,
-  `test_pincode_address.py`, plus `generate_synthetic.py` (fixtures). (No `test_ucid` /
-  `test_sampling` yet — older docs listed them; treat as a coverage gap.)
-- `pytest` config in `pyproject.toml`; `perf` marker reserved for opt-in slow tests.
+  `test_pincode_address.py`, `test_categories.py` (rule filtering + progress callback),
+  `test_e2e_workpaper.py` (end-to-end synthetic workpaper; marked `perf`, skip in CI),
+  `test_imports.py` (smoke-import all modules), plus `tests/generate_synthetic.py` (fixtures).
+  (No `test_ucid` / `test_sampling` yet — still a coverage gap.)
+- `pytest` config in `pyproject.toml`; `perf` marker = slow, opt-in only.
 - **CI** (`.github/workflows/ci.yml`, Python 3.13): `ruff check .` → `black --check .` →
-  `pytest -m "not perf" -v`. Keep code ruff/black-clean (line length 100) or CI fails.
+  `pytest -m "not perf" -v`. Keep ruff/black-clean (line length 100) or CI fails.
+- **Release CI** (`.github/workflows/release.yml`): triggered on git tag `v*.*.*`; builds
+  PyInstaller `.exe` + Electron NSIS installer; publishes to GitHub Releases for auto-update.
 
 ---
 
 ## 13. Commands
 
 ```bash
-# Local one-click (Windows): venv setup → git pull → uvicorn --reload :8000
-start.bat
+# ── Local dev ──────────────────────────────────────────────────────────────
+start.bat                                            # Windows one-click: venv → git pull → :8000
 
-# Manual
-python -m venv .venv && .venv\Scripts\activate      # or: source .venv/bin/activate
+python -m venv .venv && .venv\Scripts\activate
 pip install -e ".[dev]"
 uvicorn app.main:app --reload                        # http://localhost:8000  (admin/admin123)
 
 ruff check . --fix && black .                        # lint + format
-pytest -m "not perf" -v                              # tests
+pytest -m "not perf" -v                              # tests (skip slow e2e)
+pytest -m perf -v                                    # include e2e workpaper test
 
-# Publish (local → GitHub → Vercel auto-deploy)
-git add -A && git commit -m "…" && git push origin main
+# ── Desktop (Electron + PyInstaller) ───────────────────────────────────────
+pip install pyinstaller
+pyinstaller build/sangir-backend.spec                # builds dist/desktop_backend.exe
+
+npm install                                          # Electron deps (package.json)
+npm run electron:dev                                 # launch Electron against dev uvicorn
+npm run build:win                                    # NSIS installer (Windows)
+npm run build:mac                                    # DMG (macOS)
+npm run build:linux                                  # AppImage
+
+# ── Publish ────────────────────────────────────────────────────────────────
+git push origin main                                 # fork
+git push upstream main                               # upstream (admin access)
+git tag v0.1.X && git push upstream --tags           # triggers release CI → GitHub Releases
 ```
 
-Remotes: `origin` = `GirishMGK/FCMR` (push target), `upstream` = `ihbsandeepreddy/FCMR`.
+Remotes: `origin` = `GirishMGK/FCMR` (fork), `upstream` = `ihbsandeepreddy/FCMR` (admin).
+
+---
+
+## 14. Logging
+
+`fcmr_core/logging_setup.py` — call `get_logger(name)` to get a `RotatingFileHandler`-backed
+logger. Handlers are attached once per name (idempotent on re-import). All logs go to
+`{data_dir}/logs/` (created by `ensure_dirs()`).
+
+| Logger name contains | File | Max size | Backups |
+|---|---|---|---|
+| `processing` or `run` | `processing.log` | 10 MB | 5 |
+| `error` | `error.log` | 10 MB | 5 |
+| `update` | `update.log` | 5 MB | 3 |
+| anything else | `app.log` | 10 MB | 5 |
+
+**PII rule: never log PAN, Aadhaar, names, account numbers, or any customer field.**
+Log job IDs, row counts, file names, status transitions — not record content.
+A `console_handler` (INFO) is also attached for dev visibility.
+
+Recent log lines are surfaced in the Settings page via `GET /api/system/logs?lines=100`.
+
+---
+
+## 15. System monitoring
+
+`app/api/system.py` — three JSON endpoints, all require login, mounted at `/api`:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/system/info` | hardware tier, total RAM, CPU count/freq, DuckDB limits, key paths |
+| `GET /api/system/usage` | live RAM used/available/%, CPU %, DuckDB spill dir size (MB) |
+| `GET /api/system/logs` | last N lines of `processing.log` (default 100) |
+
+These feed the **Settings page** (live resource meters + log viewer). The page also shows
+the active DuckDB memory limit and threads so auditors can see the resource profile.
+
+---
+
+## 17. Backup & restore
+
+`fcmr_core/backup.py` — programmatic backup/restore of the catalog and outputs:
+
+- `create_backup()` → zips `catalog.duckdb` + `data/.session_secret` + `data/outputs/**`
+  into `data/backups/SAND_Backup_<YYYYMMDD_HHMMSS>.zip` (ZIP_DEFLATED). Returns the `Path`.
+- `restore_backup(path)` → extracts zip into `data_dir`, overwriting existing catalog.
+  **Destructive** — caller must confirm. No UI hook yet; callable from a management script.
+
+Backups are not triggered automatically; they are meant to be called before risky operations
+(schema migrations, bulk re-runs) or on a scheduled basis by the operator.
 
 ---
 
@@ -452,11 +565,13 @@ server-rendered.
 
 ## 18. Known limitations & scaling notes
 
-- **O(n²) hot spots.** `ucid.py` (pairwise `_should_connect`) and `duplicates.py::
-  address_duplicate` (nested row loop) are quadratic. The "5M-row" claim in the old spec is
-  **not realistic** for these. Real ceiling today is ~tens of thousands of `customer_master`
-  rows. Treat large-scale customer_master as future work (blocking/keying before pairwise).
-- **Row-wise Python loops** in most rules (not vectorized Polars) — correct but not fast.
+- **O(n²) hot spot: `ucid.py`** — pairwise `_should_connect` loop. The "5M-row" claim in
+  the old spec is **not realistic** for UCID. Real ceiling is ~tens of thousands of
+  `customer_master` rows. Future fix: blocking/keying before pairwise.
+- **`address_duplicate` is now O(n × avg_tokens)** (fixed in v0.1.23): builds an inverted
+  token index, filters candidate pairs sharing ≥3 tokens, skips buckets > 500 rows, then
+  confirms only candidates with Jaccard ≥ 0.85. No longer a scaling concern for typical files.
+- **Row-wise Python loops** in most other rules (not vectorized Polars) — correct but not fast.
 - **Vercel data is ephemeral** (`/tmp`) — not a system of record (see §1.5).
 - **`requirements.txt` is a subset** of `pyproject.toml` — currently missing `openpyxl` and
   `pyarrow`. Workpaper/EAD Excel export and some Parquet paths can fail on Vercel until these
@@ -474,6 +589,9 @@ server-rendered.
 |---|---|---|
 | **No LLM/AI; deterministic only** | Audit defensibility & reproducibility | Core product promise |
 | **Store row data in DuckDB tables, delete Parquet/CSV after ingest** | Single durable store; survives restart locally; simpler than managing parquet dirs | Changing this touches `store.py`, `uploads.py`, `runs.py`, `ead_consolidate.py` |
+| **Hardware-tier DuckDB limits (`apply_duckdb_limits`)** | Prevents OOM on budget laptops; auto-detected, override via env | Always call `apply_duckdb_limits(con)` on every analytics DuckDB connection |
+| **Electron + PyInstaller desktop; data in per-user appdata** | No admin rights required; data survives app reinstalls; offline-capable | Desktop is the primary durable deployment (not Vercel) |
+| **`address_duplicate` uses inverted token index (not O(n²) loop)** | Scales to real-world file sizes; keeps audit run times reasonable | Do not revert to nested loop |
 | **Additive-only catalog migrations** | `git pull` must never destroy local audit data | Hard rule |
 | **Aadhaar: salted SHA-256 + masked display** | Legal/privacy; dedup without exposure | Hard rule |
 | **Seeded stratified sampling (`SHA256(eng:run)`)** | Reproducible, defensible sample | Hard rule |
@@ -492,17 +610,22 @@ what changed:
 
 - [ ] **Schema** (`fcmr_core/schemas/*.yaml`) — new/renamed canonical fields, aliases, required.
 - [ ] **Rules** (`fcmr_core/rules/*`) — new rule + `@register` + import in `_ensure_rules_loaded`;
-      new numeric field? update `_NUMERIC_CANONICALS`.
+      new numeric field? update `_NUMERIC_CANONICALS`; add to the right `CATEGORIES` entry.
 - [ ] **Severity/colors** — `sampling/stratification.py::_SEVERITY_MAP`, `reporting/charts.py`,
       `reporting/workpaper.py` source-doc map.
-- [ ] **Catalog** (`catalog/store.py`) — new column? add via guarded `ALTER TABLE … ADD COLUMN`
-      (never drop); add CRUD.
-- [ ] **API** (`app/api/*`) — route + session/engagement scoping + login gating.
+- [ ] **Catalog** (`catalog/store.py`) — new column? guarded `ALTER TABLE … ADD COLUMN` (never
+      drop); add CRUD helpers.
+- [ ] **API** (`app/api/*`) — route + session/engagement scoping + login gating; new system
+      metric? add to `system.py`.
 - [ ] **Templates** (`app/web/templates/*`) — extend `base.html`, reuse blocks.
 - [ ] **CSS** (`static/css/main.css`) — reuse variables/classes; no new hex/fonts.
-- [ ] **Config** (`config.py`) — new `FCMR_*` setting + default; surface at `/settings` if live-tunable.
+- [ ] **Config** (`config.py`) — new `FCMR_*` setting + default; surface at `/settings` if
+      live-tunable. New DuckDB connection? call `apply_duckdb_limits(con)`.
+- [ ] **Logging** — use `get_logger(name)` from `logging_setup.py`; log job IDs / counts / status,
+      **never PII**.
 - [ ] **Deps** — update **both** `pyproject.toml` and `requirements.txt`.
-- [ ] **Tests** (`tests/`) — add/extend; keep ruff + black clean.
+- [ ] **Tests** (`tests/`) — add/extend; keep ruff + black clean; mark slow tests `@pytest.mark.perf`.
+- [ ] **Desktop** — if adding a new data directory, add it to `ensure_dirs()` in `config.py`.
 - [ ] **This doc** — update the affected section(s) and, if a principle changed, §20.
 
 ---
