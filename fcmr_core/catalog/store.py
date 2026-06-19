@@ -7,15 +7,36 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import threading
+
 import duckdb
 
 from fcmr_core.config import apply_duckdb_limits, settings
 
+# Single persistent connection to catalog.duckdb, shared across all threads in
+# this process. DuckDB allows multiple cursors on one connection concurrently.
+# A per-call duckdb.connect() to the same file from a second OS process (e.g.
+# uvicorn --reload spawning a new worker while the old one hasn't exited yet)
+# raises "file being used by another process". The persistent connection avoids
+# that entirely — only one OS-level file handle is ever open.
+_db_lock = threading.Lock()
+_db_conn: duckdb.DuckDBPyConnection | None = None
+
 
 def _conn() -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect(str(settings.catalog_path))
-    apply_duckdb_limits(con)
-    return con
+    """Return a cursor on the shared persistent connection.
+
+    Callers use ``with _conn() as con:`` — the cursor closes on __exit__ but
+    the underlying file handle stays open, avoiding the OS file-lock that
+    occurs when a new duckdb.connect() call races with an existing one from a
+    reloading uvicorn worker.
+    """
+    global _db_conn
+    with _db_lock:
+        if _db_conn is None:
+            _db_conn = duckdb.connect(str(settings.catalog_path))
+            apply_duckdb_limits(_db_conn)
+    return _db_conn.cursor()
 
 
 def init_catalog() -> None:
@@ -307,6 +328,23 @@ def get_run(run_id: str) -> dict | None:
             return None
         cols = [d[0] for d in con.description]
     return dict(zip(cols, rows[0]))
+
+
+def list_runs_for_engagement(engagement_id: str) -> list[dict]:
+    """Return all runs for an engagement, joined with upload filename, newest first."""
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT r.*, u.filename, u.report_type, u.row_count
+            FROM runs r
+            LEFT JOIN uploads u ON r.upload_id = u.upload_id
+            WHERE r.engagement_id = ?
+            ORDER BY r.started_at DESC
+            """,
+            [engagement_id],
+        ).fetchall()
+        cols = [d[0] for d in con.description]
+    return [dict(zip(cols, row)) for row in rows]
 
 
 # ---------------------------------------------------------------------------

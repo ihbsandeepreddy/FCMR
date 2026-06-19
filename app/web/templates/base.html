@@ -63,12 +63,21 @@
         Column Mapping
       </a>
 
-      <a href="/dashboard" class="nav-item {% if request.url.path.startswith('/runs/') %}active{% endif %}">
+      <a href="/runs" class="nav-item {% if request.url.path == '/runs' or request.url.path.startswith('/runs/') %}active{% endif %}">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
           <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" fill="none" opacity=".6"/>
           <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="currentColor"/>
         </svg>
         Data Analytics
+      </a>
+
+      <a href="/consolidate" class="nav-item {% if request.url.path == '/consolidate' or request.url.path.startswith('/consolidate/') %}active{% endif %}">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="3" width="6" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none" opacity=".7"/>
+          <rect x="9" y="3" width="6" height="10" rx="1.5" stroke="currentColor" stroke-width="1.4" fill="none" opacity=".7"/>
+          <path d="M7 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Data Consolidation
       </a>
 
       <a href="/dashboard" class="nav-item {% if request.url.path.startswith('/dashboard/uploads') and '/map-columns' not in request.url.path %}active{% endif %}">

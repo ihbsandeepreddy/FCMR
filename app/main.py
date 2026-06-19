@@ -12,6 +12,7 @@ from starlette.responses import RedirectResponse, Response
 from app.api import (
     auth,
     blob_upload,
+    consolidate,
     downloads,
     ead_consolidate,
     engagements,
@@ -120,3 +121,6 @@ app.include_router(blob_upload.router, prefix="", tags=["blob"])
 
 # EAD consolidation routes — require login
 app.include_router(ead_consolidate.router, prefix="", tags=["ead"])
+
+# Data consolidation hub — require login
+app.include_router(consolidate.router, prefix="", tags=["consolidate"])
