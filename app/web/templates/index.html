@@ -3,18 +3,7 @@
 {% block page_title %}Dashboard{% endblock %}
 
 {% block topbar_actions %}
-  {% set ead_ready_count = uploads | selectattr("report_type", "equalto", "ead_files") | selectattr("status", "equalto", "ready") | list | length %}
-  {% if ead_ready_count > 0 %}
-  <a href="/dashboard/ead/consolidate" class="btn btn-ghost" style="margin-left:auto;">
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right:2px;">
-      <path d="M3 8h10M8 3v10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-    </svg>
-    Consolidate EAD Files ({{ ead_ready_count }})
-  </a>
-  <a href="/dashboard/upload" class="btn btn-primary" style="margin-left:8px;">
-  {% else %}
   <a href="/dashboard/upload" class="btn btn-primary" style="margin-left:auto;">
-  {% endif %}
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
       <rect x="1" y="1" width="14" height="14" rx="3" stroke="white" stroke-width="1.6" fill="none"/>
       <path d="M8 11V5M5.5 7.5L8 5L10.5 7.5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>

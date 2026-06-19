@@ -14,7 +14,6 @@ from app.api import (
     blob_upload,
     consolidate,
     downloads,
-    ead_consolidate,
     engagements,
     runs,
     system,
@@ -135,8 +134,5 @@ app.include_router(system.router, prefix="/api", tags=["system"])
 # Blob upload routes (token endpoint is public; register endpoint requires login)
 app.include_router(blob_upload.router, prefix="", tags=["blob"])
 
-# EAD consolidation routes — require login
-app.include_router(ead_consolidate.router, prefix="", tags=["ead"])
-
-# Data consolidation hub — require login
+# Schema reconciliation + consolidated-data downloads — require login
 app.include_router(consolidate.router, prefix="", tags=["consolidate"])

@@ -32,6 +32,7 @@ class RuleMeta:
 
 
 _REGISTRY: list[RuleMeta] = []
+_rules_loaded = False
 
 CATEGORIES = [
     {
@@ -204,7 +205,13 @@ def run_pipeline(
 
 
 def _ensure_rules_loaded() -> None:
-    if _REGISTRY:
+    # Guard on an explicit completion flag — not on ``_REGISTRY`` being
+    # non-empty.  Tests (or callers) that import a single rule module directly
+    # partially populate the registry; checking ``_REGISTRY`` would then short-
+    # circuit here and leave the remaining modules (e.g. ``bank_account``)
+    # unregistered.
+    global _rules_loaded
+    if _rules_loaded:
         return
     # Import triggers registration via @register decorators
     from fcmr_core.rules import (
@@ -216,3 +223,5 @@ def _ensure_rules_loaded() -> None:
         pincode_address,  # noqa: F401
         ucid,  # noqa: F401
     )
+
+    _rules_loaded = True

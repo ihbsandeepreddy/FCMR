@@ -40,7 +40,7 @@ Two distinct capabilities live in the app:
 | Capability | Input report type | What it does |
 |---|---|---|
 | **KYC / data-quality analytics** | `customer_master` | Runs the 24-rule deterministic pipeline → wide/long exception CSVs, dashboard charts, ICAI-sampled 4-sheet Excel workpaper. |
-| **EAD file consolidation** | `ead_files` | Maps each L&T-Finance-style EAD/ECL export to 39 canonical columns and merges many files into one consolidated CSV / Excel (no rules run). |
+| **Multi-file consolidation** | any report type | Multi-file/folder uploads are merged into one source at ingest time, with a guided schema-reconciliation step when layouts differ (§9); the consolidated source is mapped/analyzed/downloaded like any upload. Used heavily for `ead_files` (39 ECL/EAD columns), no rules run there. |
 
 Other report types (`collection_report`, `disbursement_report`, `technical_writeoff`) have
 schemas for ingestion/mapping but **no dedicated analytics yet** — they ingest and store, and
@@ -95,7 +95,7 @@ and the `VERCEL` env var. Three environments:
 | Working store | **DuckDB tables** inside `catalog.duckdb` | one embedded DB for catalog *and* row data (see §4) |
 | In-memory analytics | Polars `DataFrame` | fast per-column ops; rules read it row-wise |
 | Cross-row dedup | DuckDB self-joins (`duplicates.py`) | SQL EXISTS for shared-key detection |
-| Excel | openpyxl | workpaper + EAD consolidation export |
+| Excel | openpyxl | workpaper + consolidated-data export |
 | Charts | hand-rolled SVG (`reporting/charts.py`) | zero chart deps, inline-safe |
 | Config | pydantic-settings | env-prefixed `FCMR_*`, `.env` support |
 | Auth | PBKDF2-HMAC-SHA256 (100k iters) + signed-cookie sessions | stdlib only |
@@ -125,11 +125,11 @@ FCMR/
 │   │   ├── settings.py           Settings page (fuzzy threshold + system monitoring)
 │   │   ├── system.py             /api/system/info|usage|logs — JSON endpoints (psutil)
 │   │   ├── blob_upload.py        Vercel Blob token + register-from-blob (large files)
-│   │   └── ead_consolidate.py    EAD multi-file merge + CSV/Excel download
+│   │   └── consolidate.py        Schema-reconciliation screen + consolidated-data downloads
 │   └── web/
 │       ├── templates/            Jinja2: base, login, engagements, index, upload,
 │       │                          upload_detail, column_map, run_detail, settings,
-│       │                          ead_consolidate
+│       │                          reconcile
 │       └── static/css/main.css   The entire design system (see §16)
 │
 ├── fcmr_core/                    Business logic (UI-independent, testable)
@@ -138,6 +138,7 @@ FCMR/
 │   ├── backup.py                 create_backup() / restore_backup() → data/backups/
 │   ├── catalog/store.py          DuckDB: catalog tables + row-data tables + CRUD + migrations
 │   ├── ingestion/pipeline.py     CSV → Parquet (DuckDB streaming), header sniff, rejects
+│   ├── ingestion/consolidation.py Multi-file grouping, schema alignment, combined-CSV merge (§9)
 │   ├── schemas/                  Column-mapping YAMLs + loader (confidence scoring)
 │   │   ├── customer_master.yaml  ~22 canonical KYC fields (analytics target)
 │   │   ├── ead_files.yaml        39 canonical ECL/EAD fields (L&T Finance LMS names)
@@ -228,8 +229,15 @@ engagements(engagement_id PK, name, client_name, period_from, period_to,
 uploads(upload_id PK, report_type, filename, csv_path, sniffed_headers(JSON),
         column_mapping(JSON {raw:canonical}), row_count, parquet_path,
         status, engagement_id → engagements, created_at,
-        batch_id, ingested_at)            -- batch_id/ingested_at added via ALTER
+        batch_id, ingested_at,            -- batch_id/ingested_at added via ALTER
+        is_consolidated, source_count, source_files_json)  -- consolidation meta (ALTER)
   -- status: mapping_pending → ready → (failed). csv_path may be a local path OR a blob URL.
+  -- is_consolidated=1 marks a merged multi-file source; source_files_json lists origin names.
+
+batches(batch_id PK, report_type, engagement_id, status, files_json(JSON),
+        consolidated_upload_id, created_at)
+  -- one row per multi-file upload awaiting schema reconciliation (§9).
+  -- status: reconcile_pending → consolidated | failed. files_json = [{name,path,headers}].
 
 runs(run_id PK, upload_id → uploads, engagement_id, status, started_at, finished_at,
      wide_csv, long_csv, error, workpaper_path)
@@ -370,13 +378,39 @@ To wire a new exception code into sampling, add it to `_SEVERITY_MAP` (else it d
 
 ---
 
-## 9. EAD consolidation (`ead_consolidate.py`)
+## 9. Ingest-time consolidation & schema reconciliation
 
-Independent of the rule pipeline. Loads all `ready` `ead_files` uploads for the active
-engagement, renames each to canonical columns using its stored `column_mapping`, tags rows
-with `_source_file`, and `pl.concat(..., how="diagonal_relaxed")` to tolerate differing
-columns across files. Downloads as CSV or a 2-sheet Excel (data + summary). The dashboard
-shows a **"Consolidate EAD Files (N)"** button when ≥1 ready EAD upload exists.
+**Multi-file / folder uploads are consolidated into ONE source at ingest time** (default on;
+a per-upload "Consolidate into a single source" toggle on the upload form lets the user opt
+out and keep one upload per file). This replaces both the old post-upload "Data Consolidation"
+tab and the EAD-specific merge flow — every report type now consolidates through one generic
+path. Logic lives in `fcmr_core/ingestion/consolidation.py`; the UI/route layer is
+`app/api/uploads.py::do_upload` + `app/api/consolidate.py` (reconcile + downloads).
+
+**Flow:**
+1. `do_upload` collects all CSVs (folder, multi-file, or zip-extracted). One file or
+   consolidation-off → legacy per-file uploads (unchanged).
+2. Multi-file + consolidate-on → raws staged to `uploads/_batch_<batch_id>/`, headers sniffed,
+   and `group_files_by_signature()` groups files by `SHA256(sorted(headers))`.
+3. **One layout** → `build_combined_csv()` merges immediately (identity alignment), creating
+   ONE consolidated upload → redirect to its `map-columns`.
+4. **>1 layout** (schema mismatch) → a `batches` row (`reconcile_pending`) is created and the
+   user is sent to **`GET /consolidate/reconcile/{batch_id}`** — a guided-alignment grid (rows =
+   unified columns = union of all headers; one editable name column + one `<select>` per file
+   layout, pre-filled by `suggest_alignment()` = exact then `difflib` fuzzy ≥ threshold). On
+   submit, the chosen alignment drives `build_combined_csv()` → one consolidated upload.
+
+**`build_combined_csv()`** (DuckDB, one pass): per file `SELECT "<raw>" AS "<unified>" | NULL …,
+'<filename>' AS _source_file FROM read_csv(..., all_varchar=true)` joined by `UNION ALL BY NAME`,
+`COPY … TO` the combined CSV. `all_varchar` avoids cross-file type clashes; types are re-inferred
+by the normal `ingest_csv` afterward. The combined CSV is then fed into the **unchanged**
+single-file `map-columns → ingest_csv → store_upload_data` pipeline, so the consolidated batch
+becomes one ordinary `data_<id>` upload (with a surviving `_source_file` column) that analytics,
+runs and downloads see with no special-casing.
+
+The upload-detail page shows a **"Consolidated · N files"** badge, a source-file strip, and
+**Download CSV / Download Excel** of the merged data (`GET /dashboard/uploads/{id}/download/{csv,excel}`,
+2-sheet Excel via `_df_to_excel`). Deterministic throughout (stdlib `difflib` only, invariant #1).
 
 ---
 
@@ -580,6 +614,10 @@ server-rendered.
   `admin`.
 - **Analytics is customer_master-only**; other report types ingest but have no rules.
 - **Test coverage gaps**: no UCID or sampling tests.
+- **Consolidation alignment grid is add/remove-free**: the reconcile UI lets you rename a
+  unified column and repoint each layout's source header, but not add or delete unified-column
+  rows. Auto-suggest may leave an all-NULL unified column when two files use different names
+  for the same field and the fuzzy match wins (harmless — drop it at the map-columns step).
 
 ---
 
@@ -588,7 +626,9 @@ server-rendered.
 | Decision | Rationale | Don't reverse without confirming |
 |---|---|---|
 | **No LLM/AI; deterministic only** | Audit defensibility & reproducibility | Core product promise |
-| **Store row data in DuckDB tables, delete Parquet/CSV after ingest** | Single durable store; survives restart locally; simpler than managing parquet dirs | Changing this touches `store.py`, `uploads.py`, `runs.py`, `ead_consolidate.py` |
+| **Store row data in DuckDB tables, delete Parquet/CSV after ingest** | Single durable store; survives restart locally; simpler than managing parquet dirs | Changing this touches `store.py`, `uploads.py`, `runs.py`, `consolidate.py` |
+| **Consolidate multi-file uploads at ingest time, by default** | One mapped/analyzed source instead of N separately-mapped files; matches how auditors think about a batch | Toggle exists to opt out; replaces the old post-hoc tab + EAD flow |
+| **Consolidation builds ONE combined CSV, then reuses the single-file ingest path** | Max reuse — analytics/runs/downloads see a normal upload; zero changes to ingest/rules | Don't fork a parallel ingest path for consolidated data |
 | **Hardware-tier DuckDB limits (`apply_duckdb_limits`)** | Prevents OOM on budget laptops; auto-detected, override via env | Always call `apply_duckdb_limits(con)` on every analytics DuckDB connection |
 | **Electron + PyInstaller desktop; data in per-user appdata** | No admin rights required; data survives app reinstalls; offline-capable | Desktop is the primary durable deployment (not Vercel) |
 | **`address_duplicate` uses inverted token index (not O(n²) loop)** | Scales to real-world file sizes; keeps audit run times reasonable | Do not revert to nested loop |

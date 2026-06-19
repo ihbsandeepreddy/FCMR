@@ -49,6 +49,19 @@
         <p class="file-selected" id="files-selected"></p>
       </div>
 
+      <!-- Consolidation toggle -->
+      <div class="form-group">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:500;">
+          <input type="checkbox" name="consolidate" value="on" checked />
+          Consolidate into a single source (recommended)
+        </label>
+        <p class="help-text">
+          When you upload multiple files or a folder, they are merged into one dataset
+          before column mapping. If the files have different column layouts, you'll be
+          guided through aligning them. Uncheck to keep each file as a separate upload.
+        </p>
+      </div>
+
       <!-- Progress bar (hidden until upload starts) -->
       <div id="upload-progress-wrap" style="display:none; margin-top:16px;">
         <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:6px;">

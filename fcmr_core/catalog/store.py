@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-
-import threading
 
 import duckdb
 
@@ -88,11 +87,28 @@ def init_catalog() -> None:
             ("engagement_id", "TEXT"),
             ("batch_id", "TEXT"),
             ("ingested_at", "TEXT"),
+            ("is_consolidated", "INTEGER DEFAULT 0"),
+            ("source_count", "INTEGER"),
+            ("source_files_json", "TEXT"),
         ]:
             try:
                 con.execute(f"ALTER TABLE uploads ADD COLUMN {col} {dtype}")
             except Exception:
                 pass  # Column already exists
+
+        # Consolidation batches — one row per multi-file upload awaiting / done
+        # schema reconciliation.  status: reconcile_pending | consolidated | failed
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS batches (
+                batch_id               TEXT PRIMARY KEY,
+                report_type            TEXT NOT NULL,
+                engagement_id          TEXT,
+                status                 TEXT NOT NULL DEFAULT 'reconcile_pending',
+                files_json             TEXT,
+                consolidated_upload_id TEXT,
+                created_at             TEXT NOT NULL
+            )
+        """)
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -268,6 +284,62 @@ def get_upload(upload_id: str) -> dict | None:
             return None
         cols = [d[0] for d in con.description]
     return dict(zip(cols, rows[0]))
+
+
+def set_upload_consolidated_meta(
+    upload_id: str,
+    *,
+    source_count: int,
+    source_files: list[str],
+) -> None:
+    """Mark an upload as a consolidated source and record its origin files."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE uploads SET is_consolidated=1, source_count=?, source_files_json=? "
+            "WHERE upload_id=?",
+            [source_count, json.dumps(source_files), upload_id],
+        )
+
+
+# ---------------------------------------------------------------------------
+# Consolidation batch CRUD
+# ---------------------------------------------------------------------------
+
+
+def create_batch(
+    batch_id: str,
+    report_type: str,
+    *,
+    engagement_id: str | None,
+    files: list[dict],
+) -> None:
+    """Persist a multi-file batch awaiting schema reconciliation.
+
+    ``files`` is a list of ``{"name", "path", "headers"}`` dicts (one per source CSV).
+    """
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO batches (batch_id, report_type, engagement_id, status, files_json, created_at) "
+            "VALUES (?, ?, ?, 'reconcile_pending', ?, ?)",
+            [batch_id, report_type, engagement_id, json.dumps(files), _now()],
+        )
+
+
+def get_batch(batch_id: str) -> dict | None:
+    with _conn() as con:
+        rows = con.execute("SELECT * FROM batches WHERE batch_id=?", [batch_id]).fetchall()
+        if not rows:
+            return None
+        cols = [d[0] for d in con.description]
+    return dict(zip(cols, rows[0]))
+
+
+def set_batch_consolidated(batch_id: str, consolidated_upload_id: str) -> None:
+    with _conn() as con:
+        con.execute(
+            "UPDATE batches SET status='consolidated', consolidated_upload_id=? WHERE batch_id=?",
+            [consolidated_upload_id, batch_id],
+        )
 
 
 # ---------------------------------------------------------------------------

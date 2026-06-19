@@ -156,7 +156,7 @@ def test_run_pipeline_preserves_order():
     def track_progress(completed: int, total: int, rule_id: str):
         progress_calls.append(rule_id)
 
-    annotated = run_pipeline(df, on_progress=track_progress, rule_ids=selected)
+    run_pipeline(df, on_progress=track_progress, rule_ids=selected)
 
     # Check progress calls match registry order
     expected_order = [r.rule_id for r in all_rules if r.rule_id in selected]
@@ -180,9 +180,7 @@ def test_run_pipeline_progress_callback():
         progress_calls.append((completed, total, rule_id))
 
     # Run only 2 rules
-    annotated = run_pipeline(
-        df, on_progress=track_progress, rule_ids=["pan_format", "aadhaar_format"]
-    )
+    run_pipeline(df, on_progress=track_progress, rule_ids=["pan_format", "aadhaar_format"])
 
     # Check progress: completed should increment, total should be 2
     assert len(progress_calls) == 2

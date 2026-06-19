@@ -62,18 +62,65 @@ async def upload_form(request: Request):
     )
 
 
+def _write_chunked(content: bytes, dest: Path) -> None:
+    """Stream-write bytes in 256 KB chunks — avoids holding the file twice in RAM."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    chunk_size = 256 * 1024
+    with dest.open("wb") as out:
+        for i in range(0, len(content), chunk_size):
+            out.write(content[i : i + chunk_size])
+
+
+def _finalize_consolidated_upload(
+    *,
+    report_type: str,
+    engagement_id: str | None,
+    batch_id: str,
+    ordered_groups: list,
+    alignment: dict,
+    unified_cols: list[str],
+    source_names: list[str],
+) -> str:
+    """Build the combined CSV and register it as one consolidated, mapping-pending upload."""
+    from fcmr_core.ingestion.consolidation import build_combined_csv
+
+    upload_id = store.create_upload(
+        report_type,
+        f"{report_type}_consolidated_{len(source_names)}files.csv",
+        batch_id=batch_id,
+        engagement_id=engagement_id,
+    )
+    combined_path = settings.uploads_dir / upload_id / "consolidated.csv"
+    build_combined_csv(ordered_groups, alignment, unified_cols, combined_path)
+    store.set_mapping_pending(upload_id, csv_path=combined_path, sniffed_headers=unified_cols)
+    store.set_upload_consolidated_meta(
+        upload_id, source_count=len(source_names), source_files=source_names
+    )
+    return upload_id
+
+
 @router.post("/upload")
 async def do_upload(
     request: Request,
     report_type: str = Form(...),
+    consolidate: str = Form("off"),
     folder: list[UploadFile] = File(default=[]),
     files: list[UploadFile] = File(default=[]),
 ):
+    import shutil
     import tempfile
     import zipfile
 
+    from fcmr_core.ingestion.consolidation import (
+        FileEntry,
+        group_files_by_signature,
+        suggest_alignment,
+        unified_columns,
+    )
+
     # Get engagement_id from session
     engagement_id = request.session.get("engagement_id")
+    consolidate_on = consolidate not in ("", "off", "false", "0", None)
 
     # Filter out empty UploadFile stubs that browsers send for unselected inputs
     folder = [f for f in folder if f.filename]
@@ -113,37 +160,62 @@ async def do_upload(
         if not processed_files:
             raise HTTPException(status_code=400, detail="No CSV files found.")
 
-        # Create upload row for each file
-        created_uploads = []
         for filename, content in processed_files:
             if len(content) > settings.max_upload_bytes:
                 raise HTTPException(status_code=413, detail=f"File {filename} exceeds 2 GB limit.")
 
-            # Create upload row with batch_id and engagement_id
-            upload_id = store.create_upload(
-                report_type,
-                filename,
-                batch_id=batch_id,
-                engagement_id=engagement_id,
+        # ── Single file, or consolidation disabled: one upload per file (legacy) ──
+        if len(processed_files) == 1 or not consolidate_on:
+            for filename, content in processed_files:
+                upload_id = store.create_upload(
+                    report_type, filename, batch_id=batch_id, engagement_id=engagement_id
+                )
+                csv_path = settings.uploads_dir / upload_id / filename
+                _write_chunked(content, csv_path)
+                headers = sniff_headers(csv_path)
+                store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
+            return RedirectResponse(url="/dashboard", status_code=303)
+
+        # ── Multi-file consolidation: stage raws into a batch dir, group by layout ──
+        batch_dir = settings.uploads_dir / f"_batch_{batch_id}"
+        entries: list[FileEntry] = []
+        for idx, (filename, content) in enumerate(processed_files):
+            # Prefix with index to avoid collisions when files share a name
+            staged = batch_dir / f"{idx:04d}_{filename}"
+            _write_chunked(content, staged)
+            entries.append(
+                FileEntry(name=filename, path=str(staged), headers=sniff_headers(staged))
             )
 
-            # Stream write in 256 KB chunks — avoids holding full file in RAM
-            dest_dir = settings.uploads_dir / upload_id
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            csv_path = dest_dir / filename
-            chunk_size = 256 * 1024
-            with csv_path.open("wb") as out:
-                for i in range(0, len(content), chunk_size):
-                    out.write(content[i : i + chunk_size])
+        groups = group_files_by_signature(entries)
 
-            # Sniff headers and set mapping_pending
-            headers = sniff_headers(csv_path)
-            store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
+        if len(groups) == 1:
+            # All files share one layout → merge straight away, then map once.
+            ordered_groups = list(groups.items())
+            unified_cols = unified_columns(groups)
+            alignment = suggest_alignment(groups, unified_cols)  # identity for a single group
+            upload_id = _finalize_consolidated_upload(
+                report_type=report_type,
+                engagement_id=engagement_id,
+                batch_id=batch_id,
+                ordered_groups=ordered_groups,
+                alignment=alignment,
+                unified_cols=unified_cols,
+                source_names=[e.name for e in entries],
+            )
+            shutil.rmtree(batch_dir, ignore_errors=True)
+            return RedirectResponse(
+                url=f"/dashboard/uploads/{upload_id}/map-columns", status_code=303
+            )
 
-            created_uploads.append((upload_id, filename))
-
-        # Redirect to dashboard (or could show a batch summary page)
-        return RedirectResponse(url="/dashboard", status_code=303)
+        # ── Schema mismatch across files → guided reconciliation screen ──
+        store.create_batch(
+            batch_id,
+            report_type,
+            engagement_id=engagement_id,
+            files=[e.as_dict() for e in entries],
+        )
+        return RedirectResponse(url=f"/consolidate/reconcile/{batch_id}", status_code=303)
 
     finally:
         if temp_dir:
@@ -316,6 +388,10 @@ async def upload_detail(request: Request, upload_id: str):
     if upload.get("column_mapping"):
         mapping_display = list(json.loads(upload["column_mapping"]).items())
 
+    source_files: list[str] = []
+    if upload.get("source_files_json"):
+        source_files = json.loads(upload["source_files_json"])
+
     runs = store.list_runs(upload_id)
     categories = list_categories()
     return templates.TemplateResponse(
@@ -325,6 +401,7 @@ async def upload_detail(request: Request, upload_id: str):
             "upload": upload,
             "runs": runs,
             "mapping_display": mapping_display,
+            "source_files": source_files,
             "categories": categories,
         },
     )

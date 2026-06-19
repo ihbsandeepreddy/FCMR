@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Reconcile Schemas — SanGir Automations{% endblock %}
+{% block page_title %}Reconcile Schemas{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/dashboard" class="btn btn-ghost" style="margin-left:auto;">← Dashboard</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="notice notice-warn" style="margin-bottom:18px;">
+  <strong>{{ file_count }} files</strong> were uploaded for
+  <span class="badge badge-type">{{ label }}</span>
+  but they have <strong>{{ groups | length }} different column layouts</strong>.
+  Align each layout's columns to one unified set below, then consolidate into a single source.
+</div>
+
+<form method="POST" action="/consolidate/reconcile/{{ batch_id }}">
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border);">
+      <div class="card-title" style="margin-bottom:2px;">Schema Alignment</div>
+      <div class="card-sub">
+        Each row is a column in the consolidated output. For every uploaded layout,
+        pick the matching source column (or <em>— none —</em> to leave it empty).
+        Auto-suggestions are pre-filled; edit the unified name in the first column.
+      </div>
+    </div>
+
+    <div style="overflow-x:auto;">
+      <table class="data-table" style="min-width:100%;">
+        <thead>
+          <tr>
+            <th style="position:sticky; left:0; background:var(--surface); z-index:2;">
+              Unified Column
+            </th>
+            {% for g in groups %}
+            <th>
+              Layout {{ g.gidx + 1 }}
+              <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:3px;">
+                {% for fname in g.files %}
+                <span class="badge badge-type" style="font-size:10px;">{{ fname }}</span>
+                {% endfor %}
+              </div>
+            </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for col in unified_cols %}
+          {% set cidx = loop.index0 %}
+          <tr>
+            <td style="position:sticky; left:0; background:var(--surface); z-index:1;">
+              <input type="text" name="ucol_{{ cidx }}" value="{{ col }}"
+                     class="mono" style="width:100%; min-width:150px;" />
+            </td>
+            {% for g in groups %}
+            <td>
+              <select name="align_{{ g.gidx }}_{{ cidx }}" class="col-select" style="min-width:150px;">
+                <option value="__none__" {% if not g.alignment.get(col) %}selected{% endif %}>— none —</option>
+                {% for h in g.headers %}
+                <option value="{{ h }}" {% if g.alignment.get(col) == h %}selected{% endif %}>{{ h }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-actions" style="padding:16px 20px;">
+      <a href="/dashboard" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-primary">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="3" width="6" height="10" rx="1.5" stroke="white" stroke-width="1.4" fill="none"/>
+          <rect x="9" y="3" width="6" height="10" rx="1.5" stroke="white" stroke-width="1.4" fill="none"/>
+          <path d="M7 8h2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        Consolidate &amp; Map Columns →
+      </button>
+    </div>
+  </div>
+</form>
+
+{% endblock %}

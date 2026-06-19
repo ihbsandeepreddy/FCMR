@@ -16,6 +16,9 @@
       <dl class="detail-grid" style="margin-top:8px;">
         <dt>Report Type</dt><dd><span class="badge badge-type">{{ "EAD Files" if upload.report_type == "ead_files" else upload.report_type.replace("_"," ").title() }}</span></dd>
         <dt>Status</dt><dd><span class="badge badge-{{ upload.status }}">{{ upload.status.replace("_"," ") }}</span></dd>
+        {% if upload.is_consolidated %}
+        <dt>Source</dt><dd><span class="badge badge-completed">Consolidated · {{ upload.source_count }} files</span></dd>
+        {% endif %}
         <dt>Row Count</dt><dd class="mono">{{ "{:,}".format(upload.row_count) if upload.row_count else "—" }}</dd>
         <dt>Uploaded</dt><dd class="timestamp">{{ upload.created_at[:19].replace("T"," ") }} UTC</dd>
         {% if upload.ingested_at %}
@@ -94,6 +97,29 @@
     </div>
   </div>
 </div>
+
+{# ── Consolidated source files + data downloads ── #}
+{% if upload.is_consolidated and source_files %}
+<div class="card">
+  <div class="card-title">Source Files ({{ source_files | length }})</div>
+  <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:10px;">
+    {% for sf in source_files %}
+    <span class="badge badge-type">{{ sf }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if upload.status == "ready" %}
+<div class="card">
+  <div class="card-title">Download Consolidated Data</div>
+  <div class="card-sub">The merged dataset as imported, before any analytics.</div>
+  <div class="card-actions" style="margin-top:12px;">
+    <a href="/dashboard/uploads/{{ upload.upload_id }}/download/csv" class="btn btn-dl">Download CSV</a>
+    <a href="/dashboard/uploads/{{ upload.upload_id }}/download/excel" class="btn btn-dl" style="margin-left:8px;">Download Excel</a>
+  </div>
+</div>
+{% endif %}
 
 {# ── Column mapping display ── #}
 {% if mapping_display %}
