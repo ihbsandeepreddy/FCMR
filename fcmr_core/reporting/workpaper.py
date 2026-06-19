@@ -1,6 +1,6 @@
 """Excel workpaper builder for audit documentation.
 
-Generates a 4-sheet workpaper: Lead Sheet, Detailed Exceptions, TOC/TOD, Methodology.
+Generates a 4-sheet workpaper: Lead Sheet, Detailed Exceptions, TOC and TOD, Methodology.
 """
 
 from __future__ import annotations
@@ -88,8 +88,8 @@ def build_workpaper(
     ws2 = wb.create_sheet("Detailed Exceptions")
     _build_detailed_exceptions_sheet(ws2, wide_csv_path, header_fill, header_font, border)
 
-    # ── Sheet 3: TOC/TOD ──
-    ws3 = wb.create_sheet("TOC/TOD")
+    # ── Sheet 3: TOC and TOD ──
+    ws3 = wb.create_sheet("TOC and TOD")
     _build_toc_tod_sheet(ws3, sample_records, header_fill, header_font, border)
 
     # ── Sheet 4: Methodology ──
