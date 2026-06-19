@@ -115,7 +115,7 @@
       <div class="form-group">
         <label for="threshold">Fuzzy Match Threshold</label>
         <div style="display:flex; gap:12px; align-items:center;">
-          <input type="range" id="threshold" name="value" min="0" max="100" value="{{ (settings.get('fuzzy_match_threshold', '0.6') | float * 100) | int }}" step="5" style="flex:1; max-width:300px;">
+          <input type="range" id="threshold" min="0" max="100" value="{{ (settings.get('fuzzy_match_threshold', '0.6') | float * 100) | int }}" step="5" style="flex:1; max-width:300px;">
           <span id="threshold-display" style="font-weight:600; min-width:50px; text-align:right;">0.60</span>
         </div>
         <p class="help-text" style="margin-top:8px;">
@@ -125,6 +125,7 @@
         </p>
       </div>
 
+      <input type="hidden" id="threshold-value" name="value">
       <input type="hidden" name="key" value="fuzzy_match_threshold">
 
       <div class="form-actions">
@@ -258,15 +259,27 @@
   // Fuzzy match threshold slider
   const slider = document.getElementById('threshold');
   const display = document.getElementById('threshold-display');
+  const valueInput = document.getElementById('threshold-value');
+  const settingsForm = document.querySelector('form[action="/settings"]');
 
   function updateDisplay() {
-    const val = (slider.value / 100).toFixed(2);
-    display.textContent = val;
+    const sliderValue = parseInt(slider.value, 10);
+    const actualValue = (sliderValue / 100).toFixed(2);
+    display.textContent = actualValue;
+    if (valueInput) {
+      valueInput.value = actualValue;
+    }
   }
 
   if (slider) {
     slider.addEventListener('input', updateDisplay);
     updateDisplay();
+  }
+
+  if (settingsForm) {
+    settingsForm.addEventListener('submit', function(e) {
+      updateDisplay();
+    });
   }
 
   // Initialize on page load
