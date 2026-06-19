@@ -42,33 +42,29 @@
           </button>
         </form>
         {% if categories %}
-        <div style="margin-top:16px; padding:16px; background:var(--subtle-bg); border-radius:6px; border:1px solid var(--border);">
-          <button type="button" onclick="document.getElementById('cat_picker').style.display=document.getElementById('cat_picker').style.display==='none'?'block':'none'; this.textContent=this.textContent==='Select categories…'?'Hide categories':'Select categories…'" class="btn btn-sm btn-ghost" style="width:100%; justify-content:flex-start;">
-            Select categories…
-          </button>
-          <div id="cat_picker" style="display:none; margin-top:12px; max-height:400px; overflow-y:auto;">
-            <form id="category_form" method="POST" action="/uploads/{{ upload.upload_id }}/run">
-              <input type="hidden" name="mode" value="selected">
-              {% for cat in categories %}
-              <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border);">
-                <label style="display:flex; align-items:center; cursor:pointer; font-weight:500; gap:8px;">
-                  <input type="checkbox" name="categories" value="{{ cat.id }}" class="cat_checkbox" data-cat="{{ cat.id }}">
-                  {{ cat.label }} ({{ cat.count }} rules)
+        <form method="POST" action="/uploads/{{ upload.upload_id }}/run" style="margin-top:16px;">
+          <input type="hidden" name="mode" value="selected">
+          <div style="padding:16px; background:var(--subtle-bg); border-radius:6px; border:1px solid var(--border);">
+            <div style="font-weight:500; margin-bottom:12px;">Select categories to run (or click Run Analytics above to run all)</div>
+            {% for cat in categories %}
+            <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border);">
+              <label style="display:flex; align-items:center; cursor:pointer; font-weight:500; gap:8px;">
+                <input type="checkbox" name="categories" value="{{ cat.id }}" class="cat_checkbox" data-cat="{{ cat.id }}">
+                {{ cat.label }} ({{ cat.count }} rules)
+              </label>
+              <div style="margin-left:24px; margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+                {% for rule in cat.rules %}
+                <label style="display:flex; align-items:center; cursor:pointer; font-size:13px; gap:6px;">
+                  <input type="checkbox" name="rules" value="{{ rule.id }}" class="rule_checkbox" data-cat="{{ cat.id }}">
+                  {{ rule.description }}
                 </label>
-                <div style="margin-left:24px; margin-top:8px; display:flex; flex-direction:column; gap:6px;">
-                  {% for rule in cat.rules %}
-                  <label style="display:flex; align-items:center; cursor:pointer; font-size:13px; gap:6px;">
-                    <input type="checkbox" name="rules" value="{{ rule.id }}" class="rule_checkbox" data-cat="{{ cat.id }}">
-                    {{ rule.description }}
-                  </label>
-                  {% endfor %}
-                </div>
+                {% endfor %}
               </div>
-              {% endfor %}
-              <button type="submit" class="btn btn-sm btn-primary" style="width:100%; margin-top:12px;">Run Selected Rules</button>
-            </form>
+            </div>
+            {% endfor %}
+            <button type="submit" class="btn btn-sm btn-primary" style="width:100%; margin-top:12px;">Run Selected Rules</button>
           </div>
-        </div>
+        </form>
         <script>
           const catCheckboxes = document.querySelectorAll('.cat_checkbox');
           const ruleCheckboxes = document.querySelectorAll('.rule_checkbox');
@@ -89,14 +85,6 @@
               catCb.checked = allChecked;
               catCb.indeterminate = someChecked && !allChecked;
             });
-          });
-          document.getElementById('category_form').addEventListener('submit', function() {
-            const selectedCats = Array.from(document.querySelectorAll('.cat_checkbox:checked')).map(cb => cb.value);
-            const selectedRules = Array.from(document.querySelectorAll('.rule_checkbox:checked')).map(cb => cb.value);
-            if (!selectedCats.length && !selectedRules.length) {
-              alert('Please select at least one category or rule.');
-              return false;
-            }
           });
         </script>
         {% endif %}
