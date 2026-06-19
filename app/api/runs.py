@@ -305,7 +305,7 @@ async def export_workpaper(run_id: str):
         raise HTTPException(status_code=404, detail="CSV files not found")
 
     try:
-        df = pl.read_csv(wide_path)
+        df = pl.read_csv(wide_path, infer_schema_length=0)
         population = len(df)
         exception_count = sum(1 for val in df["overall_status"] if val != "OK")
 
