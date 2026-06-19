@@ -70,6 +70,7 @@ a = Analysis(
         "email.mime.multipart",
         "multipart",
         "python_multipart",
+        "psutil",
     ],
     hookspath=[],
     hooksconfig={},

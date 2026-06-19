@@ -9,11 +9,13 @@ from pathlib import Path
 
 import duckdb
 
-from fcmr_core.config import settings
+from fcmr_core.config import apply_duckdb_limits, settings
 
 
 def _conn() -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(str(settings.catalog_path))
+    con = duckdb.connect(str(settings.catalog_path))
+    apply_duckdb_limits(con)
+    return con
 
 
 def init_catalog() -> None:

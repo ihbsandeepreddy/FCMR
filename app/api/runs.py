@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
+import psutil
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -98,6 +99,14 @@ def _run_analytics(run_id: str, upload_id: str) -> None:
 
         _check_cancel()
         store.update_run(run_id, progress_step="Loading data file", progress_pct=2)
+
+        # Pre-flight: warn if available RAM is below 2 GB before we start
+        available_gb = psutil.virtual_memory().available / 1024**3
+        if available_gb < 2.0:
+            logger.warning(
+                "low_ram run_id=%s available_gb=%.1f — processing will rely on DuckDB disk spill",
+                run_id, available_gb,
+            )
 
         # Data lives in DuckDB after ingestion; parquet is deleted post-import.
         try:

@@ -24,7 +24,7 @@ from collections import defaultdict
 import duckdb
 import polars as pl
 
-from fcmr_core.config import settings
+from fcmr_core.config import apply_duckdb_limits, settings
 from fcmr_core.rules.registry import register
 
 
@@ -92,6 +92,7 @@ def _exact_pairs_duckdb(keys: list[str]) -> list[tuple[int, int]]:
         return []
     work = pl.DataFrame({"_idx": list(range(len(keys))), "_key": keys})
     with duckdb.connect() as con:
+        apply_duckdb_limits(con)
         con.register("tbl", work.to_arrow())
         rows = con.execute("""
             SELECT a._idx, b._idx

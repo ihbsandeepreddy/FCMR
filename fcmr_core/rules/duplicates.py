@@ -19,7 +19,7 @@ import hashlib
 import duckdb
 import polars as pl
 
-from fcmr_core.config import settings
+from fcmr_core.config import apply_duckdb_limits, settings
 from fcmr_core.rules.registry import register
 
 
@@ -71,6 +71,7 @@ def _find_duplicates_duckdb(df: pl.DataFrame, key_col: str, id_col: str, ucid_co
     If ucid_col is None, returns {key_value: [(id, "", ""), ...]}.
     """
     with duckdb.connect() as con:
+        apply_duckdb_limits(con)
         con.register("tbl", df.to_arrow())
         if ucid_col and lan_col:
             query = f"""

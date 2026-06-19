@@ -3,7 +3,35 @@ import secrets
 import sys
 from pathlib import Path
 
+import psutil
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _detect_tier() -> str:
+    """Detect hardware tier from total system RAM.
+
+    low  (<12 GB)  — budget laptops
+    mid  (12–24 GB) — standard business laptops
+    high (>24 GB)  — workstations
+    """
+    try:
+        gb = psutil.virtual_memory().total / 1024**3
+    except Exception:
+        gb = 8  # safe fallback
+    if gb < 12:
+        return "low"
+    if gb < 24:
+        return "mid"
+    return "high"
+
+
+# DuckDB limits per tier — keeps DuckDB from consuming all system RAM.
+# memory_limit caps in-process usage; spill to temp_dir when over limit.
+_DUCK_LIMITS = {
+    "low":  {"memory_gb": 3, "threads": 2},
+    "mid":  {"memory_gb": 6, "threads": 4},
+    "high": {"memory_gb": 12, "threads": 6},
+}
 
 # On Vercel the filesystem is read-only except /tmp
 _ON_VERCEL = bool(os.environ.get("VERCEL"))
@@ -26,6 +54,13 @@ class Settings(BaseSettings):
 
     # Backend and networking
     backend_port: int = 8000
+
+    # Hardware tier — auto-detected; override with FCMR_HW_TIER=low|mid|high
+    hw_tier: str = ""
+
+    # DuckDB resource limits — derived from tier; override individually if needed
+    duckdb_memory_limit: str = ""   # e.g. "6GB"; empty = auto-detect from tier
+    duckdb_threads: int = 0          # 0 = auto-detect from tier
 
     # Ingest tuning — keep chunk size low enough to stay inside 15 GB RAM when
     # processing 5M-row CSVs with many wide columns.
@@ -58,6 +93,15 @@ class Settings(BaseSettings):
         else:
             # Dev mode — use repo-relative data/ directory
             data_root = self.base_dir / "data"
+
+        # Resolve hardware tier and DuckDB limits
+        if not self.hw_tier:
+            self.hw_tier = _detect_tier()
+        limits = _DUCK_LIMITS.get(self.hw_tier, _DUCK_LIMITS["low"])
+        if not self.duckdb_memory_limit:
+            self.duckdb_memory_limit = f"{limits['memory_gb']}GB"
+        if not self.duckdb_threads:
+            self.duckdb_threads = limits["threads"]
 
         self.data_dir = data_root
         self.uploads_dir = self.data_dir / "uploads"
@@ -100,3 +144,20 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def apply_duckdb_limits(con) -> None:
+    """Apply memory and thread limits to a DuckDB connection.
+
+    Call this once immediately after opening any DuckDB connection that will
+    run analytics (duplicate detection, UCID grouping, etc.).  The catalog
+    connection (metadata only) does not need these limits — they are already
+    conservative by default — but it doesn't hurt to apply them there too.
+    """
+    spill_dir = str(settings.data_dir / "duckdb_spill")
+    try:
+        con.execute(f"SET memory_limit='{settings.duckdb_memory_limit}'")
+        con.execute(f"SET threads={settings.duckdb_threads}")
+        con.execute(f"SET temp_directory='{spill_dir}'")
+    except Exception:
+        pass  # Older DuckDB version or in-memory DB — limits are advisory
