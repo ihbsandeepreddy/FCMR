@@ -80,7 +80,7 @@ class DownloadCookieMiddleware(BaseHTTPMiddleware):
             and response.headers.get("content-disposition", "").startswith("attachment")
         ):
             response.set_cookie(
-                f"dl_done={dl_token}", value="1", path="/", max_age=20
+                f"dl_done_{dl_token}", value="1", path="/", max_age=20
             )
         return response
 

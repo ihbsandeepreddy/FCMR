@@ -180,9 +180,9 @@
         var pollCount = 0;
         var pollInterval = setInterval(function() {
           pollCount++;
-          if (document.cookie.indexOf('dl_done=' + token) !== -1) {
+          if (document.cookie.indexOf('dl_done_' + token) !== -1) {
             clearInterval(pollInterval);
-            document.cookie = 'dl_done=' + token + '; path=/; max-age=0';
+            document.cookie = 'dl_done_' + token + '; path=/; max-age=0';
             window.FCMRLoading.hide();
           }
           if (pollCount > 50) { // ~20s timeout
