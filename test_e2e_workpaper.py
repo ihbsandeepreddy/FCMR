@@ -5,6 +5,7 @@ import csv
 import tempfile
 from pathlib import Path
 
+import pytest
 import polars as pl
 
 from fcmr_core.ingestion.pipeline import ingest_csv
@@ -62,6 +63,7 @@ def create_sample_csv(path: Path, rows: int = 100) -> None:
             )
 
 
+@pytest.mark.perf
 def test_full_pipeline():
     """Test: CSV → Parquet → Rules → Wide CSV → Long CSV → Workpaper."""
     with tempfile.TemporaryDirectory() as tmpdir:
