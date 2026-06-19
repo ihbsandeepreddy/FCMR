@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ label }} Consolidation — SanGir Automations{% endblock %}
+{% block page_title %}Data Consolidation{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/consolidate" class="btn btn-ghost" style="margin-left:auto;">← All Types</a>
+{% endblock %}
+
+{% block content %}
+
+{# ── Summary cards ── #}
+<div class="stat-row" style="margin-bottom:16px;">
+  <div class="stat-card">
+    <div class="stat-label">Report Type</div>
+    <div class="stat-value" style="font-size:18px;">{{ label }}</div>
+    <div class="stat-meta">consolidated</div>
+  </div>
+  <div class="stat-card stat-ok">
+    <div class="stat-label">Total Rows</div>
+    <div class="stat-value">{{ "{:,}".format(total_rows) }}</div>
+    <div class="stat-meta">across all files</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Columns</div>
+    <div class="stat-value">{{ total_cols }}</div>
+    <div class="stat-meta">canonical fields</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Source Files</div>
+    <div class="stat-value">{{ file_count }}</div>
+    <div class="stat-meta">merged</div>
+  </div>
+</div>
+
+{# ── Source file list ── #}
+{% if source_files %}
+<div class="card" style="padding:14px 20px; margin-bottom:16px;">
+  <div style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Source Files</div>
+  <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    {% for f in source_files %}
+    <span class="badge badge-type" style="font-size:11.5px; font-weight:400;">{{ f }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Download actions ── #}
+<div class="card" style="padding:16px 20px; margin-bottom:16px;">
+  <div class="card-title" style="margin-bottom:12px;">Download Consolidated Data</div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a href="/consolidate/{{ report_type }}/download/csv" class="btn btn-primary">
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+        <path d="M6 1V8M3 5.5L6 8L9 5.5" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="1" y="10" width="10" height="1.3" rx=".65" fill="white"/>
+      </svg>
+      Download CSV
+    </a>
+    <a href="/consolidate/{{ report_type }}/download/excel" class="btn btn-ghost">
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+        <path d="M6 1V8M3 5.5L6 8L9 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="1" y="10" width="10" height="1.3" rx=".65" fill="currentColor"/>
+      </svg>
+      Download Excel (.xlsx)
+    </a>
+  </div>
+</div>
+
+{# ── Preview table ── #}
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="padding:14px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
+    <div>
+      <div class="card-title" style="margin-bottom:0;">Data Preview</div>
+      <div style="font-size:12px; color:var(--muted); margin-top:3px;">
+        Showing first {{ preview_count }} of {{ "{:,}".format(total_rows) }} rows
+      </div>
+    </div>
+  </div>
+
+  <div style="overflow-x:auto; max-height:520px; overflow-y:auto;">
+    <table class="data-table" style="margin-bottom:0; min-width:max-content;">
+      <thead style="position:sticky; top:0; background:var(--bg); z-index:1;">
+        <tr>
+          {% for col in preview_cols %}
+          <th style="white-space:nowrap; font-size:11.5px;">{{ col.replace('_',' ').title() }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>
+          {% for val in row %}
+          <td style="font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+              title="{{ val if val is not none else '' }}">
+            {{ val if val is not none else '' }}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if total_rows > preview_count %}
+  <div style="padding:10px 20px; border-top:1px solid var(--border); font-size:12px; color:var(--muted);">
+    {{ "{:,}".format(total_rows - preview_count) }} more rows — download CSV or Excel to see all data.
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Data Consolidation — SanGir Automations{% endblock %}
+{% block page_title %}Data Consolidation{% endblock %}
+
+{% block content %}
+
+{% if not report_types %}
+<div class="empty-state">
+  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="margin-bottom:12px; opacity:.35;">
+    <rect x="4" y="8" width="14" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+    <rect x="22" y="8" width="14" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+    <path d="M11 30h18M20 26v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  </svg>
+  <div style="font-weight:600; margin-bottom:6px;">No uploads to consolidate</div>
+  <div class="help-text">Upload and map at least two files of the same type, then come back here.</div>
+  <a href="/dashboard/upload" class="btn btn-primary" style="margin-top:16px;">New Upload</a>
+</div>
+
+{% else %}
+
+<div style="margin-bottom:20px;">
+  <p style="font-size:13.5px; color:var(--muted); max-width:600px;">
+    Select a report type to merge all its uploaded files into one consolidated dataset.
+    Only files with <strong>ready</strong> status are included.
+  </p>
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:16px;">
+  {% for rt in report_types %}
+  <div class="card" style="padding:20px; display:flex; flex-direction:column; gap:12px;">
+
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+      <div>
+        <div class="card-title" style="margin-bottom:4px;">{{ rt.label }}</div>
+        <span class="badge badge-type" style="font-size:11px;">{{ rt.report_type }}</span>
+      </div>
+      <div style="text-align:right; flex-shrink:0;">
+        <div style="font-size:22px; font-weight:700; font-family:'Lora',serif; color:var(--accent);">
+          {{ rt.ready }}
+        </div>
+        <div style="font-size:11px; color:var(--muted);">file{{ 's' if rt.ready != 1 else '' }}</div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:16px; font-size:12.5px; color:var(--muted);">
+      <span>
+        <strong style="color:var(--fg);">{{ "{:,}".format(rt.total_rows) }}</strong> rows
+      </span>
+      {% if rt.pending %}
+      <span style="color:var(--warn-fg);">{{ rt.pending }} pending mapping</span>
+      {% endif %}
+    </div>
+
+    <a href="/consolidate/{{ rt.report_type }}" class="btn btn-primary" style="margin-top:4px; text-align:center;">
+      Consolidate →
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+{% endif %}
+
+{% endblock %}
