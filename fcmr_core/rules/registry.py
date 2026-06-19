@@ -36,6 +36,20 @@ _rules_loaded = False
 
 CATEGORIES = [
     {
+        "id": "missing_data",
+        "label": "Missing Data",
+        "rule_ids": [
+            "pan_missing",
+            "aadhaar_missing",
+            "voter_id_missing",
+            "mobile_missing",
+            "email_missing",
+            "dob_missing",
+            "pin_missing",
+            "address_completeness",
+        ],
+    },
+    {
         "id": "kyc_format",
         "label": "KYC & Document Format",
         "rule_ids": [
@@ -59,7 +73,6 @@ CATEGORIES = [
             "pincode_exists",
             "state_pin_match",
             "district_pin_match",
-            "address_completeness",
         ],
     },
     {
@@ -220,6 +233,7 @@ def _ensure_rules_loaded() -> None:
         duplicates,  # noqa: F401
         email,  # noqa: F401
         kyc_format,  # noqa: F401
+        missing_data,  # noqa: F401
         pincode_address,  # noqa: F401
         ucid,  # noqa: F401
     )

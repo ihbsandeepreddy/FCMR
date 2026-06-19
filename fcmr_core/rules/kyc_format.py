@@ -152,9 +152,9 @@ def rule_pan_format(df: pl.DataFrame) -> pl.DataFrame:
     for pan in pan_series:
         pan = (pan or "").strip().upper()
         if not pan:
-            statuses.append("WARN")
-            codes.append("PAN_MISSING")
-            descs.append("PAN not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
         elif not _PAN_RE.match(pan):
             statuses.append("ERROR")
             codes.append("PAN_INVALID_FORMAT")
@@ -182,9 +182,9 @@ def rule_aadhaar_format(df: pl.DataFrame) -> pl.DataFrame:
     for raw in aadh_series:
         val = (raw or "").strip().replace(" ", "").replace("-", "")
         if not val:
-            statuses.append("WARN")
-            codes.append("AADHAAR_MISSING")
-            descs.append("Aadhaar not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
         elif not val.isdigit() or len(val) != 12:
             statuses.append("ERROR")
             codes.append("AADHAAR_INVALID_FORMAT")
@@ -216,9 +216,9 @@ def rule_voter_id_format(df: pl.DataFrame) -> pl.DataFrame:
     for val in series:
         val = (val or "").strip().upper()
         if not val:
-            statuses.append("WARN")
-            codes.append("VOTER_ID_MISSING")
-            descs.append("Voter ID not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
         elif not _EPIC_RE.match(val):
             statuses.append("ERROR")
             codes.append("VOTER_ID_INVALID_FORMAT")
@@ -302,9 +302,9 @@ def rule_mobile_format(df: pl.DataFrame) -> pl.DataFrame:
         if val.startswith("+91"):
             val = val[3:]
         if not val:
-            statuses.append("WARN")
-            codes.append("MOBILE_MISSING")
-            descs.append("Mobile number not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
         elif not _MOBILE_RE.match(val):
             statuses.append("ERROR")
             codes.append("MOBILE_INVALID_FORMAT")
@@ -328,9 +328,9 @@ def rule_email_format(df: pl.DataFrame) -> pl.DataFrame:
     for val in series:
         val = (val or "").strip()
         if not val:
-            statuses.append("WARN")
-            codes.append("EMAIL_MISSING")
-            descs.append("Email not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
         elif not _EMAIL_RE.match(val):
             statuses.append("ERROR")
             codes.append("EMAIL_INVALID_FORMAT")
@@ -355,9 +355,9 @@ def rule_dob_validity(df: pl.DataFrame) -> pl.DataFrame:
     for val in series:
         val = (val or "").strip()
         if not val:
-            statuses.append("WARN")
-            codes.append("DOB_MISSING")
-            descs.append("Date of birth not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
             continue
         parsed = _parse_dob(val)
         if parsed is None:

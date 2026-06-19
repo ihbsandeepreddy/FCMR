@@ -178,24 +178,68 @@ def _build_lead_sheet(
 
     row += 1
 
-    # Top exception codes
-    exception_codes = aggregate_exception_codes(wide_csv_path, top_n=10)
+    # All exception codes (no cap)
+    exception_codes = aggregate_exception_codes(wide_csv_path, top_n=None)
     source_docs = {
+        # Duplicates
         "PAN_DUPLICATE": "PAN Registration / KYC",
         "AADHAAR_DUPLICATE": "Aadhaar Card / KYC",
         "VOTER_ID_DUPLICATE": "Voter Card / KYC",
+        "MOBILE_DUPLICATE": "KYC Form / Mobile Verification",
+        "NAME_DOB_DUPLICATE": "ID Proof / KYC Application",
         "ADDRESS_DUPLICATE": "Sanction Letter / Address Proof",
         "BANK_ACCOUNT_DUPLICATE": "Bank Statement / Account Proof",
+        # KYC format
+        "PAN_INVALID_FORMAT": "PAN Card / KYC Application",
+        "PAN_INVALID_ENTITY_CHAR": "PAN Card / KYC Application",
+        "AADHAAR_INVALID_FORMAT": "Aadhaar Card / KYC",
+        "AADHAAR_INVALID_PREFIX": "Aadhaar Card / KYC",
+        "AADHAAR_CHECKSUM_FAIL": "Aadhaar Card / KYC",
+        "VOTER_ID_INVALID_FORMAT": "Voter Card / KYC",
+        "PASSPORT_INVALID_FORMAT": "Passport / KYC",
+        "DL_INVALID_FORMAT": "Driving Licence / KYC",
+        "DL_INVALID_STATE_CODE": "Driving Licence / KYC",
+        "MOBILE_INVALID_FORMAT": "KYC Form / Mobile Verification",
+        "EMAIL_INVALID_FORMAT": "KYC Form / Email Verification",
         "EMAIL_COMPANY_GENERIC_DOMAIN": "KYC Form / Email Verification",
+        "DOB_INVALID_FORMAT": "ID Proof / Birth Certificate",
+        "DOB_FUTURE_DATE": "ID Proof / Birth Certificate",
+        "DOB_AGE_IMPLAUSIBLE": "ID Proof / Birth Certificate",
+        "DOB_AGE_TOO_YOUNG": "ID Proof / Birth Certificate",
         "DOB_AGE_OUT_OF_RANGE": "ID Proof / Birth Certificate",
         "BANK_ACCOUNT_INVALID_LENGTH": "Bank Statement / Account Details",
+        # PIN / Address
+        "PIN_INVALID_FORMAT": "KYC Form / Address Proof",
+        "PIN_NOT_FOUND": "KYC Form / Address Proof",
+        "STATE_PIN_MISMATCH": "KYC Form / Address Proof",
+        "DISTRICT_PIN_MISMATCH": "KYC Form / Address Proof",
+        "ADDRESS_INCOMPLETE": "KYC Form / Address Proof",
+        # Missing fields
+        "PAN_MISSING": "KYC Form / Application",
+        "AADHAAR_MISSING": "KYC Form / Application",
+        "VOTER_ID_MISSING": "KYC Form / Application",
+        "MOBILE_MISSING": "KYC Form / Application",
+        "EMAIL_MISSING": "KYC Form / Application",
+        "DOB_MISSING": "KYC Form / Application",
+        "PIN_MISSING": "KYC Form / Application",
+        # UCID
+        "UCID_KYC_INCONSISTENT": "KYC Application / Multiple ID Proofs",
     }
+
+    def _compliance_point(code: str) -> str:
+        if "DUP" in code or "DUPLICATE" in code:
+            return "Risk Assessment — Duplicate / Fraud Indicator"
+        if "MISSING" in code or "INCOMPLETE" in code:
+            return "Data Completeness — Mandatory Field"
+        if "KYC_INCONSISTENT" in code:
+            return "Risk Assessment — Identity Inconsistency"
+        return "Data Quality — Format / Validity"
 
     for code, count in exception_codes.items():
         ws[f"A{row}"] = code
         ws[f"B{row}"] = count
         ws[f"C{row}"] = source_docs.get(code, "SOA / KYC")
-        ws[f"D{row}"] = "Risk Assessment" if "DUP" in code else "Data Quality"
+        ws[f"D{row}"] = _compliance_point(code)
         row += 1
 
     # Adjust column widths

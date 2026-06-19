@@ -38,9 +38,10 @@ class TestPanFormat:
         assert _status(df, "pan_format") == "OK"
 
     def test_missing_pan(self):
+        # Blank PAN → OK; missing detection is handled by missing_data.pan_missing rule
         df = rule_pan_format(_df(pan=""))
-        assert _status(df, "pan_format") == "WARN"
-        assert _code(df, "pan_format") == "PAN_MISSING"
+        assert _status(df, "pan_format") == "OK"
+        assert _code(df, "pan_format") == ""
 
     def test_invalid_format_short(self):
         df = rule_pan_format(_df(pan="ABC123"))
@@ -102,8 +103,9 @@ class TestAadhaarFormat:
         assert _status(df, "aadhaar_format") == "OK"
 
     def test_missing(self):
+        # Blank Aadhaar → OK; missing detection handled by missing_data.aadhaar_missing rule
         df = rule_aadhaar_format(_df(aadhaar=""))
-        assert _status(df, "aadhaar_format") == "WARN"
+        assert _status(df, "aadhaar_format") == "OK"
 
     def test_wrong_length(self):
         df = rule_aadhaar_format(_df(aadhaar="123456789"))
@@ -144,8 +146,9 @@ class TestVoterIdFormat:
         assert _code(df, "voter_id_format") == "VOTER_ID_INVALID_FORMAT"
 
     def test_missing(self):
+        # Blank Voter ID → OK; missing detection handled by missing_data.voter_id_missing rule
         df = rule_voter_id_format(_df(voter_id=""))
-        assert _status(df, "voter_id_format") == "WARN"
+        assert _status(df, "voter_id_format") == "OK"
 
 
 # ---------------------------------------------------------------------------
@@ -237,5 +240,6 @@ class TestEmailFormat:
         assert _code(df, "email_format") == "EMAIL_INVALID_FORMAT"
 
     def test_missing(self):
+        # Blank email → OK; missing detection handled by missing_data.email_missing rule
         df = rule_email_format(_df(email=""))
-        assert _status(df, "email_format") == "WARN"
+        assert _status(df, "email_format") == "OK"

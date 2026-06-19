@@ -46,9 +46,9 @@ def rule_pincode_exists(df: pl.DataFrame) -> pl.DataFrame:
     for pin in pins:
         pin = (pin or "").strip()
         if not pin:
-            statuses.append("WARN")
-            codes.append("PIN_MISSING")
-            descs.append("Pincode not provided")
+            statuses.append("OK")
+            codes.append("")
+            descs.append("")
         elif not _PIN_RE.match(pin):
             statuses.append("ERROR")
             codes.append("PIN_INVALID_FORMAT")

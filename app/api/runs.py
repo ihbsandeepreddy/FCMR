@@ -16,11 +16,15 @@ from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import read_parquet
 from fcmr_core.logging_setup import get_logger
-from fcmr_core.reporting.aggregation import aggregate_exception_codes, aggregate_status_counts
+from fcmr_core.reporting.aggregation import (
+    aggregate_exception_codes,
+    aggregate_missing_data,
+    aggregate_status_counts,
+)
 from fcmr_core.reporting.builder import build_exception_csvs
 from fcmr_core.reporting.charts import build_bar_chart, build_donut_svg
 from fcmr_core.reporting.workpaper import build_workpaper
-from fcmr_core.rules.registry import resolve_rule_ids, run_pipeline
+from fcmr_core.rules.registry import list_categories, resolve_rule_ids, run_pipeline
 from fcmr_core.sampling.sample import select_sample
 
 logger = get_logger("processing")
@@ -44,11 +48,45 @@ async def runs_list(request: Request):
     engagement_id = request.session.get("engagement_id")
     runs = store.list_runs_for_engagement(engagement_id) if engagement_id else []
     has_running = any(r["status"] in ("running", "pending") for r in runs)
+    all_uploads = store.list_uploads(engagement_id=engagement_id) if engagement_id else []
+    ready_uploads = [u for u in all_uploads if u["status"] == "ready"]
+    categories = list_categories()
     return templates.TemplateResponse(
         request=request,
         name="runs_list.html",
-        context={"runs": runs, "has_running": has_running},
+        context={
+            "runs": runs,
+            "has_running": has_running,
+            "ready_uploads": ready_uploads,
+            "categories": categories,
+        },
     )
+
+
+@router.post("/runs/start")
+async def runs_start(
+    background_tasks: BackgroundTasks,
+    upload_id: str = Form(...),
+    mode: str = Form("all"),
+    categories: list[str] | None = Form(None),
+    rules: list[str] | None = Form(None),
+):
+    upload = store.get_upload(upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if upload["status"] != "ready":
+        raise HTTPException(status_code=400, detail="Upload is not ready")
+
+    run_id = store.create_run(upload_id)
+    store.update_run(run_id, status="running", started_at=_now())
+
+    if mode == "all":
+        rule_ids = None
+    else:
+        rule_ids = resolve_rule_ids(categories or [], rules or [])
+
+    background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
+    return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
 
 
 @router.post("/uploads/{upload_id}/run")
@@ -215,6 +253,7 @@ async def run_detail(request: Request, run_id: str):
     bar_svg = None
     summary = None
     ran_categories = None
+    missing_summary = None
 
     # Map selected_rules to category labels
     if run.get("selected_rules"):
@@ -254,6 +293,11 @@ async def run_detail(request: Request, run_id: str):
                 "all_codes": all_codes,
             }
 
+            if run.get("long_csv"):
+                long_path = Path(run["long_csv"])
+                if long_path.exists():
+                    missing_summary = aggregate_missing_data(long_path, total)
+
     return templates.TemplateResponse(
         request=request,
         name="run_detail.html",
@@ -263,6 +307,7 @@ async def run_detail(request: Request, run_id: str):
             "donut_svg": donut_svg,
             "bar_svg": bar_svg,
             "ran_categories": ran_categories,
+            "missing_summary": missing_summary,
         },
     )
 

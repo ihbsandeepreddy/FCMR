@@ -44,53 +44,7 @@
             Run Analytics
           </button>
         </form>
-        {% if categories %}
-        <form method="POST" action="/uploads/{{ upload.upload_id }}/run" style="margin-top:16px;">
-          <input type="hidden" name="mode" value="selected">
-          <div style="padding:16px; background:var(--subtle-bg); border-radius:6px; border:1px solid var(--border);">
-            <div style="font-weight:500; margin-bottom:12px;">Select categories to run (or click Run Analytics above to run all)</div>
-            {% for cat in categories %}
-            <div style="margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border);">
-              <label style="display:flex; align-items:center; cursor:pointer; font-weight:500; gap:8px;">
-                <input type="checkbox" name="categories" value="{{ cat.id }}" class="cat_checkbox" data-cat="{{ cat.id }}">
-                {{ cat.label }} ({{ cat.count }} rules)
-              </label>
-              <div style="margin-left:24px; margin-top:8px; display:flex; flex-direction:column; gap:6px;">
-                {% for rule in cat.rules %}
-                <label style="display:flex; align-items:center; cursor:pointer; font-size:13px; gap:6px;">
-                  <input type="checkbox" name="rules" value="{{ rule.id }}" class="rule_checkbox" data-cat="{{ cat.id }}">
-                  {{ rule.description }}
-                </label>
-                {% endfor %}
-              </div>
-            </div>
-            {% endfor %}
-            <button type="submit" class="btn btn-sm btn-primary" style="width:100%; margin-top:12px;" data-loading-text="Starting…">Run Selected Rules</button>
-          </div>
-        </form>
-        <script>
-          const catCheckboxes = document.querySelectorAll('.cat_checkbox');
-          const ruleCheckboxes = document.querySelectorAll('.rule_checkbox');
-          catCheckboxes.forEach(catCb => {
-            catCb.addEventListener('change', function() {
-              const catId = this.getAttribute('data-cat');
-              const rulesInCat = document.querySelectorAll(`.rule_checkbox[data-cat="${catId}"]`);
-              rulesInCat.forEach(r => r.checked = this.checked);
-            });
-          });
-          ruleCheckboxes.forEach(ruleCb => {
-            ruleCb.addEventListener('change', function() {
-              const catId = this.getAttribute('data-cat');
-              const catCb = document.querySelector(`.cat_checkbox[data-cat="${catId}"]`);
-              const rulesInCat = document.querySelectorAll(`.rule_checkbox[data-cat="${catId}"]`);
-              const allChecked = Array.from(rulesInCat).every(r => r.checked);
-              const someChecked = Array.from(rulesInCat).some(r => r.checked);
-              catCb.checked = allChecked;
-              catCb.indeterminate = someChecked && !allChecked;
-            });
-          });
-        </script>
-        {% endif %}
+        <a href="/runs" class="btn btn-ghost" style="margin-top:10px; display:inline-block; font-size:13px;">Configure analysis (select categories) →</a>
       {% elif upload.status == "failed" %}
         <p class="error-text" style="font-size:13px;">Ingestion failed. Please re-upload the file.</p>
       {% endif %}

@@ -31,19 +31,21 @@ def test_categories_coverage():
 def test_list_categories():
     """Verify list_categories returns enriched category data."""
     cats = list_categories()
-    assert len(cats) == 4
+    assert len(cats) == 5
     assert all("id" in c and "label" in c and "rules" in c and "count" in c for c in cats)
     assert {c["id"] for c in cats} == {
+        "missing_data",
         "kyc_format",
         "address_pin",
         "duplicates",
         "identity_grouping",
     }
-    # Check rule counts
-    assert cats[0]["count"] == 11  # kyc_format
-    assert cats[1]["count"] == 4  # address_pin
-    assert cats[2]["count"] == 7  # duplicates
-    assert cats[3]["count"] == 2  # identity_grouping
+    cat_by_id = {c["id"]: c for c in cats}
+    assert cat_by_id["missing_data"]["count"] == 8   # 7 missing rules + address_completeness
+    assert cat_by_id["kyc_format"]["count"] == 11
+    assert cat_by_id["address_pin"]["count"] == 3    # pincode_exists, state_pin_match, district_pin_match
+    assert cat_by_id["duplicates"]["count"] == 7
+    assert cat_by_id["identity_grouping"]["count"] == 2
 
 
 def test_resolve_rule_ids_empty():
@@ -80,7 +82,6 @@ def test_resolve_rule_ids_union():
         "pincode_exists",
         "state_pin_match",
         "district_pin_match",
-        "address_completeness",
         "pan_format",
     }
     assert set(result) == expected

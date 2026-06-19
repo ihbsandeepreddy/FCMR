@@ -35,9 +35,10 @@ class TestPincodeExists:
         assert _code(df, "pincode_exists") == "PIN_INVALID_FORMAT"
 
     def test_missing_pin(self):
+        # Blank pincode → OK; missing detection handled by missing_data.pin_missing rule
         df = rule_pincode_exists(_df(pincode=""))
-        assert _status(df, "pincode_exists") == "WARN"
-        assert _code(df, "pincode_exists") == "PIN_MISSING"
+        assert _status(df, "pincode_exists") == "OK"
+        assert _code(df, "pincode_exists") == ""
 
 
 class TestStatePinMatch:

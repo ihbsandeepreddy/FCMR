@@ -8,6 +8,63 @@
 
 {% block content %}
 
+{# ── Start New Analysis card ── #}
+{% if ready_uploads %}
+<div class="card" style="margin-bottom:20px;">
+  <div class="card-title" style="margin-bottom:4px;">Start New Analysis</div>
+  <div class="card-sub" style="margin-bottom:16px;">Select a ready upload and optionally pick specific categories or rules.</div>
+
+  <form method="POST" action="/runs/start" id="new-analysis-form">
+    <div class="form-group" style="margin-bottom:16px;">
+      <label for="upload-select" style="font-weight:500; margin-bottom:6px; display:block;">Upload</label>
+      <select id="upload-select" name="upload_id" class="col-select" style="max-width:480px; width:100%;" required>
+        <option value="" disabled selected>— select an upload —</option>
+        {% for u in ready_uploads %}
+        <option value="{{ u.upload_id }}">{{ u.filename }} ({{ "{:,}".format(u.row_count) if u.row_count else "?" }} rows · {{ "EAD Files" if u.report_type == "ead_files" else u.report_type.replace("_"," ").title() }})</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div style="padding:16px; background:var(--bg); border:1px solid var(--border); border-radius:8px; margin-bottom:16px;">
+      <div style="font-weight:500; margin-bottom:12px; font-size:13.5px;">Categories &amp; Rules <span style="font-weight:400; color:var(--muted);">(leave all unchecked to run everything)</span></div>
+      {% for cat in categories %}
+      <div style="margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--border);">
+        <label style="display:flex; align-items:center; cursor:pointer; font-weight:500; gap:8px; font-size:13.5px;">
+          <input type="checkbox" name="categories" value="{{ cat.id }}" class="cat_checkbox" data-cat="{{ cat.id }}">
+          {{ cat.label }} <span style="font-weight:400; color:var(--muted);">({{ cat.count }} rules)</span>
+        </label>
+        <div style="margin-left:24px; margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+          {% for rule in cat.rules %}
+          <label style="display:flex; align-items:center; cursor:pointer; font-size:12.5px; gap:6px; color:var(--fg);">
+            <input type="checkbox" name="rules" value="{{ rule.id }}" class="rule_checkbox" data-cat="{{ cat.id }}">
+            {{ rule.description }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button type="submit" name="mode" value="all" class="btn btn-run" data-loading-text="Starting…">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
+          <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
+        </svg>
+        Run All Rules
+      </button>
+      <button type="submit" name="mode" value="selected" class="btn btn-primary" data-loading-text="Starting…">
+        Run Selected Rules
+      </button>
+    </div>
+  </form>
+</div>
+{% else %}
+<div class="notice notice-warn" style="margin-bottom:16px;">
+  No ready uploads in this engagement. <a href="/dashboard/upload">Upload a file</a> first.
+</div>
+{% endif %}
+
 {% if not runs %}
 <div class="empty-state">
   <svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="margin-bottom:12px; opacity:.35;">
@@ -15,8 +72,7 @@
     <path d="M15 20L20 15L25 20M20 15V26" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>
   <div style="font-weight:600; margin-bottom:6px;">No analytics runs yet</div>
-  <div class="help-text">Go to the Dashboard, open an upload, and click <strong>Run Analytics</strong>.</div>
-  <a href="/dashboard" class="btn btn-primary" style="margin-top:16px;">← Dashboard</a>
+  <div class="help-text">Use the form above to start your first analysis.</div>
 </div>
 
 {% else %}
@@ -91,6 +147,34 @@
 </div>
 
 {% endif %}
+
+<script>
+(function () {
+  const catCheckboxes = document.querySelectorAll('.cat_checkbox');
+  const ruleCheckboxes = document.querySelectorAll('.rule_checkbox');
+  catCheckboxes.forEach(function(catCb) {
+    catCb.addEventListener('change', function() {
+      const catId = this.getAttribute('data-cat');
+      document.querySelectorAll('.rule_checkbox[data-cat="' + catId + '"]').forEach(function(r) {
+        r.checked = catCb.checked;
+      });
+    });
+  });
+  ruleCheckboxes.forEach(function(ruleCb) {
+    ruleCb.addEventListener('change', function() {
+      const catId = this.getAttribute('data-cat');
+      const catCb = document.querySelector('.cat_checkbox[data-cat="' + catId + '"]');
+      const rulesInCat = document.querySelectorAll('.rule_checkbox[data-cat="' + catId + '"]');
+      const allChecked = Array.from(rulesInCat).every(function(r) { return r.checked; });
+      const someChecked = Array.from(rulesInCat).some(function(r) { return r.checked; });
+      if (catCb) {
+        catCb.checked = allChecked;
+        catCb.indeterminate = someChecked && !allChecked;
+      }
+    });
+  });
+})();
+</script>
 
 {% if has_running %}
 <script>

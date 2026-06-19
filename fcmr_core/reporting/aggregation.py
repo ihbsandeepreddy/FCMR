@@ -25,7 +25,9 @@ def aggregate_status_counts(wide_csv_path: Path) -> dict[str, int]:
     try:
         df = pl.read_csv(wide_csv_path, columns=["overall_status"], infer_schema_length=0)
         counts = df["overall_status"].value_counts(sort=True).to_dicts()
-        result = {row["overall_status"]: row["counts"] for row in counts}
+        # Polars ≥0.19 names the count column "count"; older versions used "counts"
+        count_key = "count" if counts and "count" in counts[0] else "counts"
+        result = {row["overall_status"]: row[count_key] for row in counts}
         # Ensure all statuses are present
         return {
             "OK": result.get("OK", 0),
@@ -69,6 +71,67 @@ def aggregate_exception_codes(wide_csv_path: Path, top_n: int | None = 10) -> di
         return {code: count for code, count in sorted_codes[:limit]}
     except Exception:
         return {}
+
+
+_MISSING_CODES = {
+    "PAN_MISSING",
+    "AADHAAR_MISSING",
+    "VOTER_ID_MISSING",
+    "MOBILE_MISSING",
+    "EMAIL_MISSING",
+    "DOB_MISSING",
+    "PIN_MISSING",
+    "ADDRESS_INCOMPLETE",
+}
+
+_MISSING_LABELS = {
+    "PAN_MISSING": "PAN",
+    "AADHAAR_MISSING": "Aadhaar",
+    "VOTER_ID_MISSING": "Voter ID",
+    "MOBILE_MISSING": "Mobile",
+    "EMAIL_MISSING": "Email",
+    "DOB_MISSING": "Date of Birth",
+    "PIN_MISSING": "Pincode",
+    "ADDRESS_INCOMPLETE": "Address (incomplete)",
+}
+
+
+def aggregate_missing_data(long_csv_path: Path, total_rows: int) -> list[dict]:
+    """Count missing-field occurrences per code from the long exception CSV.
+
+    Args:
+        long_csv_path: Path to the long exception CSV (one row per exception).
+        total_rows: Total record count (denominator for % calculation).
+
+    Returns:
+        List of {field, code, count, pct} sorted by count descending,
+        only for codes in _MISSING_CODES.
+    """
+    if not long_csv_path.exists() or total_rows == 0:
+        return []
+
+    try:
+        df = pl.read_csv(
+            long_csv_path, columns=["exception_code"], infer_schema_length=0
+        )
+        counts: dict[str, int] = {}
+        for code in df["exception_code"]:
+            if code and code in _MISSING_CODES:
+                counts[code] = counts.get(code, 0) + 1
+
+        result = []
+        for code, cnt in sorted(counts.items(), key=lambda x: x[1], reverse=True):
+            result.append(
+                {
+                    "field": _MISSING_LABELS.get(code, code),
+                    "code": code,
+                    "count": cnt,
+                    "pct": round(cnt / total_rows * 100, 1),
+                }
+            )
+        return result
+    except Exception:
+        return []
 
 
 def get_summary(wide_csv_path: Path) -> dict:
