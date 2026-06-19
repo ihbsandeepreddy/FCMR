@@ -1,502 +1,520 @@
-# CLAUDE.md — SanGir Automations Specification
+# CLAUDE.md — SanGir Automations (FCMR) — Single Source of Truth
 
-**Status:** Complete implementation of Phases 0–6 (login, engagements, column mapping, UCID/duplicates, charts, Excel workpaper). This document is the **canonical forward-looking specification** for all future development.
-
----
-
-## Product Overview
-
-**SanGir Automations** is a **production-grade, deterministic audit analytics tool** for NBFC loan portfolio validation. It ingests large operational CSV exports (customer master, LMS, collection, disbursement data), streams them to Parquet, runs 27 hard-coded validation rules across KYC, duplicates, PIN, and address checks, and produces:
-- **Wide exception CSV** (one row per customer)
-- **Long exception CSV** (one row per exception, for drill-down)
-- **Dashboard charts** (SVG donut + bar)
-- **4-sheet Excel workpaper** with deterministic audit sampling
-
-### Non-Negotiable Invariants
-
-1. **No AI/LLM anywhere** — All logic hard-coded, deterministic, unit-tested. Fuzzy matching uses stdlib `difflib.SequenceMatcher`; no embeddings, no models, no API calls.
-2. **Memory-bounded streaming** — 5M+ row CSVs process on ~15 GB laptop. Polars `scan_csv` (lazy), DuckDB for cross-row work. Never materialize full CSV.
-3. **Aadhaar protection** — Never persist full Aadhaar. Store salted SHA256 hash; display `XXXXXXXX1234` masked form in all outputs (UI, CSV, Excel).
-4. **Data-survival invariant** — All schema changes **additive only**. No `DROP COLUMN`, no `DROP TABLE`, no destructive migrations. `CREATE TABLE IF NOT EXISTS`, guarded `ALTER TABLE ... ADD COLUMN`. Ensures `git pull` never deletes user data.
-5. **Deterministic reproducibility** — Same input + same seed = same output, always. Seeded random sampling, hash-based mapping profiles, fixed ICAI tables. Auditable and defensible.
+> **This is the one authoritative document for the project.** It captures the full
+> infrastructure, UI, and the decisions behind them. All future work — and every
+> change suggestion — must be evaluated against, and kept consistent with, this file.
+> When code and this document disagree, treat it as a bug in one of them and reconcile
+> immediately (update the code or update this doc in the same change).
+>
+> **Last reconciled with code:** 2026-06-19 (full codebase read).
+> Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
 
 ---
 
-## Tech Stack & Why
+## 0. How this document is used (operating agreement)
 
-| Component | Choice | Reason |
-|-----------|--------|--------|
-| Language | Python 3.13 | Type hints, async support, scientific ecosystem |
-| CSV ingest | Polars (lazy `scan_csv`) | Streaming, no full load, faster than Pandas |
-| Cross-row work | DuckDB | SQL joins for duplicates, PIN-master validation |
-| Working format | Parquet | Columnar, compressed, one-time conversion from CSV |
-| Backend | FastAPI + Uvicorn | Async, fast, OpenAPI docs, Session middleware built-in |
-| Templates | Jinja2 | Server-rendered (no SPA), decoupled from business logic |
-| Catalog | DuckDB | Embedded SQL, persistent, no external DB needed |
-| Deployment | Local/Desktop | Git pull + pip install; persistent `data/` directory survives restarts |
-
-**Why not:** Pandas (OOM at 5M rows), Kubernetes (overkill), Vercel (4.5 MB body limit, no persistent disk), LLM matching (non-deterministic, non-auditable).
-
----
-
-## Feature Summary (Phases 0–6)
-
-| Phase | Feature | Status | Key Files |
-|-------|---------|--------|-----------|
-| **0** | Rebrand to SanGir Automations | ✅ | `base.html`, `main.py`, logo |
-| **1** | Login (PBKDF2) + Engagements workspace | ✅ | `auth.py`, `engagements.py`, session middleware |
-| **2** | Folder/file/ZIP ingestion + batch ID + ingested_at | ✅ | `uploads.py`, `upload.html` |
-| **3** | Column mapping with % confidence scoring + saved profiles | ✅ | `loader.py`, `uploads.py`, `column_map.html` |
-| **4** | UCID (union-find) + enhanced duplicates (LAN-scoped) + 6 new checks | ✅ | `ucid.py`, `duplicates.py`, `email.py`, `bank_account.py`, `kyc_format.py` |
-| **5** | Dashboard SVG charts (donut + bar) + export | ✅ | `charts.py`, `aggregation.py`, `run_detail.html` |
-| **6** | 4-sheet Excel workpaper + ICAI-ICFR sampling | ✅ | `sampling/`, `workpaper.py`, `/export/workpaper` route |
+1. **Single source of truth.** This file describes what *is* true in the code today plus
+   the *intent* behind it. The old "Phases 0–6" framing has been retired — the product is
+   past phasing; it is described here by capability, not by phase.
+2. **Change protocol.** When a change is requested, the assistant will:
+   - locate **every** layer the change touches (schema YAML, rules, catalog/store, API
+     route, template, CSS, config, tests, deployment), make the edits across all of them so
+     the change is internally consistent, then
+   - **report back exactly what changed** (files + one-line rationale each), and
+   - update the relevant section of this document in the same pass.
+   See [§22 Change checklist by layer](#22-change-checklist-by-layer).
+3. **Decisions are sticky.** [§20 Decision log](#20-decision-log) records *why* things are
+   the way they are. Do not silently reverse a logged decision — flag it and confirm first.
 
 ---
 
-## Architecture
+## 1. Product overview
+
+**SanGir Automations** (internal/repo name **FCMR**) is a **deterministic audit-analytics
+web tool** for NBFC loan-portfolio validation. An auditor creates an *engagement*, uploads
+operational CSV exports, maps their columns to canonical fields, runs hard-coded validation
+rules, and downloads exception reports and an Excel audit workpaper.
+
+Two distinct capabilities live in the app:
+
+| Capability | Input report type | What it does |
+|---|---|---|
+| **KYC / data-quality analytics** | `customer_master` | Runs the 24-rule deterministic pipeline → wide/long exception CSVs, dashboard charts, ICAI-sampled 4-sheet Excel workpaper. |
+| **EAD file consolidation** | `ead_files` | Maps each L&T-Finance-style EAD/ECL export to 39 canonical columns and merges many files into one consolidated CSV / Excel (no rules run). |
+
+Other report types (`collection_report`, `disbursement_report`, `technical_writeoff`) have
+schemas for ingestion/mapping but **no dedicated analytics yet** — they ingest and store, and
+the rule pipeline only produces meaningful results for `customer_master`.
+
+### Non-negotiable invariants
+
+1. **No AI/LLM anywhere.** All logic is hard-coded and deterministic. Fuzzy matching uses
+   stdlib `difflib.SequenceMatcher` (column mapping) and token-set Jaccard (address). No
+   embeddings, no model calls. This is a hard auditability requirement.
+2. **Aadhaar protection.** Never persist or display a full Aadhaar. Use a **salted SHA-256
+   hash** for dedup/grouping; show masked `XXXXXXXX1234` in any output. Salt comes from
+   `FCMR_AADHAAR_HASH_SALT`.
+3. **Deterministic reproducibility.** Same input + same seed ⇒ identical output. Sampling
+   seed = `SHA256(engagement_id:run_id)`; UCID/group IDs are hash-derived.
+4. **Additive schema migrations only.** Catalog changes use `CREATE TABLE IF NOT EXISTS` and
+   guarded `ALTER TABLE … ADD COLUMN`. No `DROP COLUMN`/`DROP TABLE`. This protects existing
+   data across `git pull` + restart **on local/desktop** (see the Vercel caveat in §1.5).
+5. **Memory-aware ingestion.** CSV → Parquet conversion is delegated to DuckDB's streaming
+   `read_csv` (never `pd.read_csv` of the whole file). *Caveat:* the per-row rule loops and
+   the UCID/address O(n²) passes are **not** streaming — see [§18 scaling notes](#18-known-limitations--scaling-notes).
+
+### 1.5 Deployment reality (important)
+
+The app runs in **two** environments, auto-detected via the `VERCEL` env var in
+`fcmr_core/config.py`:
+
+| | **Local / desktop (primary)** | **Vercel serverless (secondary)** |
+|---|---|---|
+| Data root | `<repo>/data/` (persistent) | `/tmp/fcmr/` (**ephemeral** — wiped on cold start) |
+| Catalog | `data/catalog.duckdb` survives restarts | `/tmp/fcmr/catalog.duckdb` **does not survive** between cold starts |
+| Large uploads | streamed to disk in 256 KB chunks | direct browser→**Vercel Blob** (4.5 MB function-body limit) |
+| Session secret | auto-generated, saved to `data/.session_secret` | **must** set `FCMR_SESSION_SECRET` env var (else startup raises) |
+| Use case | real audit work, data retention | demos / preview only |
+
+> ⚠️ **Invariant #4 (data survival) only holds locally.** On Vercel the catalog lives in
+> `/tmp` and is effectively a throwaway. Do not treat Vercel as a system of record. This
+> directly contradicts the old docs that said "Vercel not supported" — Vercel *is* wired up,
+> but only for ephemeral/demo use.
+
+---
+
+## 2. Tech stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Language | Python ≥ 3.11 (CI runs 3.13) | typing, async, data ecosystem |
+| Web framework | FastAPI + Uvicorn | async, built-in OpenAPI, Starlette session middleware |
+| Templating | Jinja2 (server-rendered) | no SPA; logic stays in Python |
+| Front-end JS | htmx (CDN) + small vanilla scripts | progressive enhancement only (upload progress, file pickers) |
+| CSV ingest | DuckDB `read_csv` (streaming) | encoding/delimiter sniffing, `ignore_errors`, large files |
+| Working store | **DuckDB tables** inside `catalog.duckdb` | one embedded DB for catalog *and* row data (see §4) |
+| In-memory analytics | Polars `DataFrame` | fast per-column ops; rules read it row-wise |
+| Cross-row dedup | DuckDB self-joins (`duplicates.py`) | SQL EXISTS for shared-key detection |
+| Excel | openpyxl | workpaper + EAD consolidation export |
+| Charts | hand-rolled SVG (`reporting/charts.py`) | zero chart deps, inline-safe |
+| Config | pydantic-settings | env-prefixed `FCMR_*`, `.env` support |
+| Auth | PBKDF2-HMAC-SHA256 (100k iters) + signed-cookie sessions | stdlib only |
+
+Full dependency list: `pyproject.toml` (canonical) and `requirements.txt` (Vercel runtime —
+note it currently **omits** `openpyxl` and `pyarrow`; see §18 known issues).
+
+---
+
+## 3. Architecture & repository layout
 
 ```
-SanGir Automations (Local Desktop App)
-│
-├── app/                              FastAPI web UI (thin layer)
-│   ├── main.py                       Router wiring, middleware stack
+FCMR/
+├── api/index.py                  Vercel entry — re-exports app.main:app
+├── app/                          FastAPI web layer (thin)
+│   ├── main.py                   App factory, lifespan init, middleware, router wiring
 │   ├── api/
-│   │   ├── auth.py                  PBKDF2 login, seed admin/admin123
-│   │   ├── engagements.py           Create/list engagements, set active
-│   │   ├── uploads.py               Folder/file ingest, column mapping, profiles
-│   │   ├── runs.py                  Execute analytics, charts, workpaper export
-│   │   └── downloads.py             Download CSV, Excel
+│   │   ├── auth.py               PBKDF2 login/logout, seed admin/admin123
+│   │   ├── engagements.py        Create/list/select engagement ("/" is the selector)
+│   │   ├── uploads.py            Upload + column-mapping UI + dashboard ("/dashboard")
+│   │   ├── runs.py               Run analytics (background task), charts, workpaper export
+│   │   ├── downloads.py          Wide/long CSV download
+│   │   ├── settings.py           Settings page (fuzzy threshold)
+│   │   ├── blob_upload.py        Vercel Blob token + register-from-blob (large files)
+│   │   └── ead_consolidate.py    EAD multi-file merge + CSV/Excel download
 │   └── web/
-│       ├── templates/               Jinja2 (base, login, engagements, upload, column_map, run_detail, etc.)
-│       └── static/                  CSS, logo, favicon
+│       ├── templates/            Jinja2: base, login, engagements, index, upload,
+│       │                          upload_detail, column_map, run_detail, settings,
+│       │                          ead_consolidate
+│       └── static/css/main.css   The entire design system (see §16)
 │
-├── fcmr_core/                        Business logic (reusable, testable, no UI dependency)
-│   ├── config.py                    Pydantic settings (DATA_DIR, AADHAAR_HASH_SALT, etc.)
-│   ├── catalog/store.py             DuckDB catalog CRUD (users, engagements, uploads, runs, mapping_profiles)
-│   │
-│   ├── schemas/                     Column-mapping YAMLs + loader with confidence scoring
-│   │   ├── customer_master.yaml     ~24 canonical fields (customer_id, pan, aadhaar, lan, coapplicant_mobile, etc.)
-│   │   └── loader.py                SchemaMap class, score_header_match(), map_headers_with_scores()
-│   │
-│   ├── ingestion/pipeline.py        Streaming CSV → Parquet conversion, structural validation
-│   │
-│   ├── rules/                       27 deterministic rules (registered via @register decorator)
-│   │   ├── registry.py              Rule pipeline runner (run_pipeline())
-│   │   ├── kyc_format.py            PAN format, Aadhaar Verhoeff, Voter ID, Passport, DL, Mobile, Email, DOB, Age range
-│   │   ├── pincode_address.py       PIN existence, state/district match, completeness
-│   │   ├── duplicates.py            PAN, Aadhaar, Mobile, Bank, Voter ID, Address, Name+DOB (LAN-scoped)
-│   │   ├── ucid.py                  Union-find grouping, KYC consistency flagging
-│   │   ├── email.py                 Company email generic domain detection
-│   │   ├── bank_account.py          Bank account length validation (9-18 digits)
-│   │   └── beneficiary.py           Stable ID + group keys
-│   │
-│   ├── reporting/                   Output builders
-│   │   ├── builder.py               Wide CSV + Long CSV generation
-│   │   ├── aggregation.py           Status/exception-code counts from wide CSV
-│   │   ├── charts.py                SVG donut (status) + bar (exception codes)
-│   │   └── workpaper.py             4-sheet Excel (Lead, Exceptions, TOC/TOD, Methodology)
-│   │
-│   ├── sampling/                    Audit sampling (deterministic, reproducible)
-│   │   ├── stratification.py        Group by exception severity (CRITICAL/HIGH/MEDIUM/LOW)
-│   │   ├── icai_table.py            ICAI-ICFR attribute table lookup (95% confidence)
-│   │   └── sample.py                Seeded stratified random selection
-│   │
-│   └── reference/pin_master.py      Bundled India Post PIN master lookup
+├── fcmr_core/                    Business logic (UI-independent, testable)
+│   ├── config.py                 Settings (paths, Vercel detection, secrets, thresholds)
+│   ├── catalog/store.py          DuckDB: catalog tables + row-data tables + CRUD + migrations
+│   ├── ingestion/pipeline.py     CSV → Parquet (DuckDB streaming), header sniff, rejects
+│   ├── schemas/                  Column-mapping YAMLs + loader (confidence scoring)
+│   │   ├── customer_master.yaml  ~22 canonical KYC fields (analytics target)
+│   │   ├── ead_files.yaml        39 canonical ECL/EAD fields (L&T Finance LMS names)
+│   │   ├── collection_report.yaml / disbursement_report.yaml / technical_writeoff.yaml
+│   │   └── loader.py             SchemaMap, alias index, difflib scoring, threshold
+│   ├── rules/                    24 deterministic rules (see §11)
+│   │   ├── registry.py           @register decorator, run_pipeline(), _coerce_str_columns()
+│   │   ├── ucid.py               Union-find grouping + KYC-consistency flag
+│   │   ├── kyc_format.py         PAN/Aadhaar(Verhoeff)/Voter/Passport/DL/Mobile/Email/DOB
+│   │   ├── duplicates.py         PAN/Aadhaar/Mobile/Bank/VoterID/Name+DOB/Address dupes
+│   │   ├── pincode_address.py    PIN existence, state/district match, completeness
+│   │   ├── email.py              Generic-domain email warning
+│   │   ├── bank_account.py       Account length (9–18 digits)
+│   │   └── beneficiary.py        Stable customer key + group id (tagging, always OK)
+│   ├── reporting/
+│   │   ├── builder.py            Wide + long exception CSVs
+│   │   ├── aggregation.py        Status counts, top exception codes
+│   │   ├── charts.py             SVG donut + horizontal bar
+│   │   └── workpaper.py          4-sheet Excel (Lead / Detailed / TOC-TOD / Methodology)
+│   ├── sampling/
+│   │   ├── stratification.py     Severity strata (CRITICAL/HIGH/MEDIUM/LOW)
+│   │   ├── icai_table.py         ICAI-ICFR attribute sample-size table (95% conf)
+│   │   └── sample.py             Seeded proportional stratified selection
+│   └── reference/pin_master.py   India Post PIN master (Parquet, lru_cached)
 │
-├── data/                            (gitignored, persistent across restarts)
-│   ├── uploads/                     Raw CSV files by upload_id
-│   ├── parquet/                     Ingested Parquet by upload_id
-│   ├── outputs/                     Exception CSVs + Excel workpapers by run_id
-│   └── catalog.duckdb               Persistent store (users, engagements, uploads, runs, profiles)
-│
-├── pyproject.toml                   Dependencies (openpyxl, polars, duckdb, fastapi, etc.)
-└── CLAUDE.md                        This file (canonical specification)
+├── tests/                        pytest: kyc_format, duplicates, ingestion, pincode_address
+├── pyproject.toml                deps, ruff, black, pytest config
+├── requirements.txt              Vercel runtime deps (subset — see §18)
+├── vercel.json                   builds api/index.py, routes /* → it
+├── start.bat                     one-click local: venv → git pull → uvicorn --reload :8000
+├── .github/workflows/ci.yml      ruff + black --check + pytest (py3.13)
+└── .claude/launch.json           dev launcher on :8001
+```
+
+### Request → data flow (customer_master analytics)
+
+```
+Upload CSV ──► (disk 256KB chunks, or Vercel Blob) ──► sniff headers ──► status=mapping_pending
+   │
+Map columns (auto-suggested via difflib ≥ threshold, or saved profile) ──► confirm
+   │
+ingest_csv(): DuckDB read_csv → rename to canonical → COPY to Parquet (ZSTD) + _row_num
+   │
+store_upload_data(): import Parquet into DuckDB table `data_<upload_id>`; DELETE Parquet + raw CSV
+   │   (mapping saved as a reusable profile keyed by SHA256(sorted headers))
+status=ready
+   │
+Run ──► background task: get_upload_df() (Polars) → run_pipeline() (24 rules) →
+        build_exception_csvs() → data/outputs/<run_id>/{wide,long}.csv → status=completed
+   │
+Run detail page: donut + bar SVG, summary
+   │
+Export workpaper ──► ICAI sample size → seeded stratified sample → 4-sheet .xlsx
 ```
 
 ---
 
-## Data Model
+## 4. Data model (DuckDB — `catalog.duckdb`)
 
-### Catalog (DuckDB, persistent at `data/catalog.duckdb`)
+Defined and migrated in `fcmr_core/catalog/store.py::init_catalog()`. **Two kinds of tables
+live in the same DuckDB file:** fixed *catalog* tables, and one *row-data* table per upload.
+
+### Catalog tables
 
 ```sql
-users(username, password_hash, display_name, created_at)
-  → Single admin for desktop; seed admin/admin123 on startup
+users(username PK, password_hash, display_name, created_at)
+  -- password_hash stored as "salt:pbkdf2hash"; seed admin/admin123 on startup
 
-engagements(engagement_id, name, client_name, period_from, period_to, status, created_by, created_at)
-  → One engagement = one audit job; scopes uploads/runs
-  → Users select active engagement → uploads/runs filtered by engagement_id in session
+engagements(engagement_id PK, name, client_name, period_from, period_to,
+            status='active', created_by → users, created_at)
+  -- one engagement = one audit job; a "default" engagement is auto-created and
+  -- used to backfill legacy rows. Active engagement is held in session.
 
-uploads(upload_id, report_type, filename, csv_path, sniffed_headers, column_mapping,
-        row_count, parquet_path, status, batch_id, ingested_at, engagement_id, created_at)
-  → status: mapping_pending → ready → (used in runs)
-  → batch_id: Shared by files in same upload session (folder/multi-file)
-  → ingested_at: ISO timestamp after successful Parquet conversion
+uploads(upload_id PK, report_type, filename, csv_path, sniffed_headers(JSON),
+        column_mapping(JSON {raw:canonical}), row_count, parquet_path,
+        status, engagement_id → engagements, created_at,
+        batch_id, ingested_at)            -- batch_id/ingested_at added via ALTER
+  -- status: mapping_pending → ready → (failed). csv_path may be a local path OR a blob URL.
 
-runs(run_id, upload_id, engagement_id, status, started_at, finished_at,
-     wide_csv, long_csv, workpaper_path, error)
-  → status: pending → running → completed | failed
-  → wide_csv, long_csv, workpaper_path: Paths to output files
+runs(run_id PK, upload_id → uploads, engagement_id, status, started_at, finished_at,
+     wide_csv, long_csv, error, workpaper_path)
+  -- status: pending → running → completed | failed
 
-mapping_profiles(profile_id, report_type, header_signature, mapping_json, engagement_id, created_by, created_at)
-  → header_signature: SHA256(sorted(raw_headers))
-  → On matching future headers: auto-apply profile, no manual re-map
-  → engagement_id nullable: NULL = global profile, else engagement-scoped
+mapping_profiles(profile_id PK, report_type, header_signature, mapping_json,
+                 engagement_id NULLABLE, created_by, created_at,
+                 UNIQUE(report_type, header_signature, engagement_id))
+  -- header_signature = SHA256(sorted(raw_headers)); engagement_id NULL = global profile.
+  -- On matching future headers → mapping auto-applied (no manual remap).
+
+settings(key PK, value, updated_at)
+  -- e.g. fuzzy_match_threshold; read by schema loader, edited via /settings.
 ```
 
-### Output CSVs (per run, in `data/outputs/{run_id}/`)
+### Row-data tables (the working store)
 
-**Wide CSV:**
-```
-customer_id  full_name  pan  overall_status  exception_count  exception_codes  exception_descriptions
-C001         John Doe  XXXXX...  ERROR       2               PAN_DUP|EMAIL_DOM  PAN shared with C005|Email is gmail.com
-```
-
-**Long CSV:**
-```
-customer_id  exception_code  exception_description
-C001         PAN_DUP         PAN shared with C005
-C001         EMAIL_DOM       Email is gmail.com
-```
-
-### Excel Workpaper (4 sheets, in `data/outputs/{run_id}/`)
-
-| Sheet | Purpose | Content |
-|-------|---------|---------|
-| **Lead Sheet** | Executive summary | Engagement info, status breakdown, top 10 exception codes with source docs |
-| **Detailed Exceptions** | Full record data | All columns from wide CSV + exception columns |
-| **TOC/TOD** | Test of Controls / Test of Details | Sampled records with blank tester/date/sign-off columns; selection_reason per sample |
-| **Methodology** | Sampling approach | ICAI/ISA/RBI/NFRA standards, fraud-risk weights, reproducibility guarantee, confidence/precision stats |
+- After mapping, each upload's data is imported into a table named
+  **`data_<upload_id-with-underscores>`** via `store_upload_data()`, and the intermediate
+  Parquet + raw CSV are **deleted**. `get_upload_df()` reads it back as a Polars DataFrame.
+- **Implication:** the old "data lives in `data/parquet/<upload_id>/`" model is gone. Parquet
+  is now a transient intermediate; the durable copy is a DuckDB table. `outputs/<run_id>/`
+  CSVs and workpapers are still written to the filesystem.
 
 ---
 
-## Core Workflows
+## 5. Report types & schemas
 
-### Workflow A: Create Engagement → Upload → Map → Run → Export
+Schemas are YAML in `fcmr_core/schemas/`, loaded by `loader.py`. Each canonical field has
+`aliases` (case-insensitive), `required`, `dtype`. The loader builds an alias→canonical index
+and scores unknown headers with `difflib.SequenceMatcher`, suggesting a mapping when the best
+score ≥ the configurable `fuzzy_match_threshold` (default **0.6**, editable at `/settings`).
 
-```
-1. User visits "/" (login required)
-2. Select or create engagement (name, client, period)
-   → Stored in catalog.engagements, session["engagement_id"] = engagement_id
-3. Click "New Upload" → POST to /dashboard/upload (folder + file inputs)
-   → Generate batch_id, sniff CSV headers for each file
-   → Create N upload rows (one per CSV), all with batch_id + engagement_id
-   → Redirect to dashboard (shows uploads by batch/status)
-4. Click "Map Columns" on upload
-   → Compute header_signature = SHA256(sorted(sniffed_headers))
-   → Check mapping_profiles table for match
-   - If hit: auto-apply profile, show "Profile applied (UUID)"
-   - If miss: display auto-suggestions with % confidence (difflib.SequenceMatcher)
-5. User confirms mapping (or adjusts)
-   → POST to /uploads/{id}/map-columns
-   → Stream CSV → Parquet, extract rows, store parquet_path + row_count
-   → Save mapping_profile with header_signature + mapping_json
-   → Set upload status = "ready"
-6. Click "Run Analytics" on ready upload
-   → Create run (status=pending), redirect to /runs/{run_id}
-   → Background task: Load Parquet → run 27-rule pipeline → build wide/long CSVs
-   → Update run status = completed + store CSV paths
-7. View run detail page
-   → Display donut chart (status breakdown) + bar chart (top 10 exception codes)
-   → "Print / PDF" button (browser print-to-PDF)
-8. Download options:
-   - "Download Workpaper (.xlsx)" → POST /runs/{id}/export/workpaper
-     - Stratify exceptions by severity
-     - Lookup ICAI-ICFR table → sample size
-     - Seeded selection (seed = SHA256(engagement_id + run_id))
-     - Generate 4-sheet Excel with sampled rows
-   - "Download Wide CSV" → /runs/{id}/download/wide
-   - "Download Long CSV" → /runs/{id}/download/long
-```
+| report_type | Required fields | Purpose | Analytics? |
+|---|---|---|---|
+| `customer_master` | `customer_id`, `full_name`, `lan` | KYC master; full 24-rule pipeline | ✅ rules |
+| `ead_files` | `loan_id` | 39 ECL/EAD columns (DrsPOS, DPDBucketing, EAD, provisions…) | merge/consolidate only |
+| `collection_report` | `loan_account_no` | collections | ingest only |
+| `disbursement_report` | `loan_account_no`, `disbursement_date` | disbursements | ingest only |
+| `technical_writeoff` | `loan_account_no` | write-offs | ingest only |
 
-### Workflow B: Deterministic Sampling for Workpaper
-
-```
-1. Read wide CSV → parse overall_status + exception_codes columns
-2. Stratify into 5 groups:
-   - CRITICAL: UCID_KYC_INCONSISTENT, PAN_DUP, AADHAAR_DUP (identity fraud)
-   - HIGH: VOTER_DUP, ADDRESS_DUP, BANK_DUP, NAME_DOB_DUP
-   - MEDIUM: EMAIL_COMPANY_DOM, DOB_AGE_RANGE, BANK_ACCT_LEN
-   - LOW: PIN_MISMATCH, DISTRICT_PIN_MISMATCH, ADDRESS_INCOMPLETE
-   - OK: No exceptions
-3. Lookup ICAI-ICFR table with:
-   - population = total row count
-   - exception_count = rows with status != "OK"
-   - confidence = 95%, tolerable_deviation = 5%
-   → Returns sample size n (e.g., 200 for 50K population)
-4. Seeded random selection:
-   - Seed = SHA256(engagement_id + run_id) → int (reproducible)
-   - Set random.seed(seed)
-   - For each stratum: sample proportionally
-     sample_size_per_stratum = n * (stratum_size / total_exceptions)
-   - random.sample(stratum_indices, sample_size_per_stratum)
-5. Tag each sample:
-   - row_index, exception_codes, selection_reason ("CRITICAL: PAN_DUP"), criticality
-6. Excel TOC/TOD sheet:
-   - Row per sample
-   - Columns: Sample# | Row_Index | Criticality | Selection_Reason | Tested_By | Date | Sign_Off | Notes
-   - Blank sign-off columns for auditors to fill
-
-Same engagement_id + run_id always produces identical sample (reproducible).
-```
+**To add a report type:** create `schemas/<name>.yaml` (the loader auto-discovers `*.yaml` on
+reload) → it appears in the upload dropdown automatically. If it needs analytics, add rules
+(§11) that read its canonical fields.
 
 ---
 
-## Rule Modules (27 Rules)
+## 6. Rules engine
 
-### KYC Format (`kyc_format.py`)
-- `pan_format` — AAAAA9999A + entity char
-- `aadhaar_format` — 12 digits + Verhoeff checksum
-- `voter_id_format` — EPIC (AAA9999999)
-- `passport_format` — A-PR-WY + 7 digits
-- `dl_format` — State code + RTO + year + sequence
-- `mobile_format` — 10 digits starting 6-9
-- `email_format` — RFC-style basic format
-- `dob_validity` — Valid date, age 1–100 years
-- `dob_age_range` — Age 18–65 (WARN if outside)
+**Mechanism (`rules/registry.py`):**
+- A rule is `fn(df: pl.DataFrame) -> pl.DataFrame` registered via `@register(rule_id, description)`.
+- `run_pipeline(df)` first calls `_coerce_str_columns()` (casts numeric-inferred columns —
+  except a known numeric allowlist — to `Utf8`, so `.strip()` in rules never hits an `int`),
+  then runs every registered rule in registration order.
+- Each rule appends three columns: `_exc_<rule_id>_status` ("OK"|"WARN"|"ERROR"),
+  `_exc_<rule_id>_code`, `_exc_<rule_id>_desc`. `reporting/builder.py` collapses these.
+- Rules are loaded once on first run via `_ensure_rules_loaded()` (import side effects).
 
-### PIN & Address (`pincode_address.py`)
-- `pincode_exists` — 6-digit format + India Post master
-- `state_pin_match` — State matches PIN master
-- `district_pin_match` — District/city matches PIN master
-- `address_completeness` — address_line1 + city + state + pincode all present
+**The 24 registered rules** (count is authoritative — older docs said 27):
 
-### Duplicates (`duplicates.py`, LAN-scoped)
-- `pan_duplicate` — Flag unless same UCID + different LANs
-- `aadhaar_duplicate` — Idem
-- `mobile_duplicate` — Idem
-- `bank_account_duplicate` — Idem
-- `name_dob_duplicate` — Idem
-- `voter_id_duplicate` — Idem
-- `address_duplicate` — Token-set Jaccard ≥0.85
+| Module | rule_id(s) | Severity of findings |
+|---|---|---|
+| `ucid.py` | `ucid` (+ emits `ucid`, `ucid_size`) | WARN `UCID_KYC_INCONSISTENT` |
+| `kyc_format.py` | `pan_format`, `aadhaar_format`, `voter_id_format`, `passport_format`, `dl_format`, `mobile_format`, `email_format`, `dob_validity`, `dob_age_range` | ERROR/WARN |
+| `pincode_address.py` | `pincode_exists`, `state_pin_match`, `district_pin_match`, `address_completeness` | ERROR/WARN |
+| `duplicates.py` | `pan_duplicate`, `aadhaar_duplicate`, `mobile_duplicate`, `bank_account_duplicate`, `name_dob_duplicate`, `voter_id_duplicate`, `address_duplicate` | ERROR (WARN for address) |
+| `email.py` | `email_company_generic_domain` | WARN |
+| `bank_account.py` | `bank_account_invalid_length` | ERROR |
+| `beneficiary.py` | `beneficiary_tagging` (emits `fcmr_customer_key`, `fcmr_group_id`) | always OK (tagging) |
 
-### UCID (`ucid.py`)
-- `ucid` — Union-find grouping (PAN, Aadhaar, Voter ID, Name+DOB, Bank Account, Address fuzzy)
-  - Emits `ucid` + `ucid_size` columns
-  - Flags `UCID_KYC_INCONSISTENT` if group has conflicting KYC values
+**Key rule logic worth knowing:**
+- **UCID** = union-find over rows connected by exact PAN / Aadhaar-hash / Voter ID /
+  Name+DOB / bank account / fuzzy address (Jaccard ≥ 0.85). Flags KYC inconsistency when a
+  group has conflicting PAN/Aadhaar/Voter/email/mobile/state/pincode.
+- **Duplicate scoping:** a shared key is **allowed (OK)** only when rows share the same UCID
+  **and** have distinct `lan`s (same person, different loans). Otherwise flagged.
+- **Aadhaar** validated by Verhoeff checksum; never stored raw (hash for dedup, mask for display).
+- **PIN** checks resolve against the bundled India Post master (`reference/pin_master.py`).
 
-### Email (`email.py`)
-- `email_company_generic_domain` — Warn if gmail, yahoo, outlook, etc. (company should use business domain)
-
-### Bank Account (`bank_account.py`)
-- `bank_account_invalid_length` — Error if not 9–18 digits
-
-### Beneficiary (`beneficiary.py`)
-- Stable customer ID + deterministic grouping
+**To add a rule:** write `fn(df)->df` in the right module, decorate with `@register`, return
+the three `_exc_*` columns, ensure the module is imported in `_ensure_rules_loaded()`, add a
+test. If it produces a new exception code, also register its **severity** in
+`sampling/stratification.py::_SEVERITY_MAP` and (optionally) a color in `reporting/charts.py`
+and a source-doc label in `reporting/workpaper.py`.
 
 ---
 
-## Column Mapping & Profiles
+## 7. Reporting outputs
 
-### Mechanism
+`reporting/builder.py::build_exception_csvs()` writes, per run, into `data/outputs/<run_id>/`:
 
-1. **SchemaMap** (in `loader.py`) with per-report YAML (e.g., `customer_master.yaml`)
-   ```yaml
-   report_type: customer_master
-   columns:
-     customer_id:
-       aliases: [customer_id, cust_id, client_id, borrower_id]
-       required: true
-       dtype: str
-     pan:
-       aliases: [pan, pan_no, pan_number]
-       required: false
-       dtype: str
-     # ... 24 fields total
-   ```
+- **`<run_id>_wide.csv`** — one row per input record (internal `_exc_*` columns dropped) plus
+  `overall_status` (worst of OK<WARN<ERROR), `exception_count`, `exception_codes` (pipe-joined),
+  `exception_descriptions` (pipe-joined).
+- **`<run_id>_long.csv`** — one row per (record, non-OK exception): `_row_num`, `customer_id`,
+  `rule_id`, `status`, `exception_code`, `exception_description`.
 
-2. **Confidence scoring** (`score_header_match()`)
-   - Exact alias match = 100%
-   - Fuzzy via `difflib.SequenceMatcher.ratio()` for partial matches
-   - Display % in UI; auto-select if ≥80%
-
-3. **Saved profiles** (table: `mapping_profiles`)
-   - On confirm: compute header_signature = SHA256(sorted(raw_headers))
-   - Save (report_type, header_signature, mapping_json, engagement_id, created_by)
-   - On future matching headers: auto-apply, no user re-mapping
+`reporting/aggregation.py` derives status counts and top-N exception-code frequencies from the
+wide CSV. `reporting/charts.py` renders an inline SVG donut (status) and horizontal bar (top
+codes) — pure string-built SVG, no libraries.
 
 ---
 
-## Aadhaar Handling (Non-Negotiable)
+## 8. Sampling & Excel workpaper
 
-**Never:**
-- Store full Aadhaar in any output CSV, database, or file
-- Display full Aadhaar in UI or logs
-- Use raw Aadhaar as key in joins
+For `customer_master` runs, **Export Workpaper** produces a 4-sheet `.xlsx`:
 
-**Always:**
-- Hash: `salted_hash = SHA256(salt + raw_aadhaar)`
-- Display masked: `XXXXXXXX1234` (last 4 digits only)
-- Use hash for dedup, not full value
+1. **Lead Sheet** — engagement info, OK/WARN/ERROR breakdown, top exception codes with mapped
+   source document + compliance point.
+2. **Detailed Exceptions** — `customer_id`, status, count, codes, descriptions.
+3. **TOC/TOD** — the sampled rows with blank `Tested_By / Date / Sign_Off` columns and a
+   `Selection_Reason` per sample.
+4. **Methodology** — sampling approach, strata weights, confidence/precision, standards (ICAI,
+   ISA 530, RBI KYC, NFRA).
 
-**Applies to:** All outputs (wide CSV, long CSV, Excel workpaper), all UI pages, debug logs.
+**Sampling pipeline:** `sampling/stratification.py` buckets rows into CRITICAL/HIGH/MEDIUM/LOW
+by their worst exception code → `sampling/icai_table.py` gives the sample size from the
+ICAI-ICFR 95%-confidence attribute table (by population band × expected deviation) →
+`sampling/sample.py` seeds `random` with `SHA256(engagement_id:run_id)` and does proportional
+stratified selection. **Reproducible by construction.**
+
+To wire a new exception code into sampling, add it to `_SEVERITY_MAP` (else it defaults to LOW).
 
 ---
 
-## Commands & Development
+## 9. EAD consolidation (`ead_consolidate.py`)
+
+Independent of the rule pipeline. Loads all `ready` `ead_files` uploads for the active
+engagement, renames each to canonical columns using its stored `column_mapping`, tags rows
+with `_source_file`, and `pl.concat(..., how="diagonal_relaxed")` to tolerate differing
+columns across files. Downloads as CSV or a 2-sheet Excel (data + summary). The dashboard
+shows a **"Consolidate EAD Files (N)"** button when ≥1 ready EAD upload exists.
+
+---
+
+## 10. Authentication, sessions & authorization
+
+- **Single admin model.** `admin` / `admin123` seeded on startup (`auth._ensure_admin`).
+  Password is PBKDF2-HMAC-SHA256, 100k iterations, stored as `salt:hash`.
+  ⚠️ **There is no change-password endpoint yet** despite the "change on first login" notice —
+  see §18.
+- **Sessions** via Starlette `SessionMiddleware` (signed cookies). `LoginRequiredMiddleware`
+  gates everything except `/login`, `/static`, `/api/blob-noop`, redirecting to `/login`.
+- Session holds `username`, `display_name`, and the active `engagement_id`/`engagement_name`.
+- No role-based access control; not multi-tenant.
+
+---
+
+## 11. Configuration & environment variables
+
+All env vars are prefixed `FCMR_` (pydantic-settings), `.env` supported. Defined in
+`fcmr_core/config.py`.
+
+| Var | Default | Notes |
+|---|---|---|
+| `FCMR_AADHAAR_HASH_SALT` | placeholder | **Set in prod.** Salt for Aadhaar hashing. |
+| `FCMR_SESSION_SECRET` | auto (local) | **Required on Vercel** (else startup error); local auto-saves to `data/.session_secret`. |
+| `FCMR_FUZZY_MATCH_THRESHOLD` | `0.6` | Also editable live at `/settings` (stored in `settings` table, which overrides the default at mapping time). |
+| `FCMR_INGEST_CHUNK_ROWS` | `100000` | streaming chunk hint |
+| `FCMR_MAX_UPLOAD_BYTES` | `2 GB` | per-file hard limit |
+| `BLOB_READ_WRITE_TOKEN` | — | Vercel Blob (not `FCMR_`-prefixed; read directly). Enables large-file path. |
+| `VERCEL` | set by Vercel | switches data root to `/tmp/fcmr`. |
+
+---
+
+## 12. Testing & CI
+
+- **Tests present:** `tests/test_kyc_format.py`, `test_duplicates.py`, `test_ingestion.py`,
+  `test_pincode_address.py`, plus `generate_synthetic.py` (fixtures). (No `test_ucid` /
+  `test_sampling` yet — older docs listed them; treat as a coverage gap.)
+- `pytest` config in `pyproject.toml`; `perf` marker reserved for opt-in slow tests.
+- **CI** (`.github/workflows/ci.yml`, Python 3.13): `ruff check .` → `black --check .` →
+  `pytest -m "not perf" -v`. Keep code ruff/black-clean (line length 100) or CI fails.
+
+---
+
+## 13. Commands
 
 ```bash
-# Environment setup
-python -m venv .venv
-source .venv/bin/activate          # Unix/Mac
-# or
-.venv\Scripts\activate              # Windows
+# Local one-click (Windows): venv setup → git pull → uvicorn --reload :8000
+start.bat
 
-pip install -e ".[dev]"             # Editable install with dev dependencies
+# Manual
+python -m venv .venv && .venv\Scripts\activate      # or: source .venv/bin/activate
+pip install -e ".[dev]"
+uvicorn app.main:app --reload                        # http://localhost:8000  (admin/admin123)
 
-# Run app
-uvicorn app.main:app --reload       # Auto-reload on file change
-# Open http://localhost:8000 → login (admin/admin123)
+ruff check . --fix && black .                        # lint + format
+pytest -m "not perf" -v                              # tests
 
-# Lint & format
-ruff check .                         # Check for issues
-ruff check . --fix                   # Auto-fix (safe rules)
-black .                              # Format code
-
-# Tests
-pytest                              # Full suite
-pytest tests/test_kyc_format.py -v # Single module
-pytest -k verhoeff                  # Single test by keyword
-pytest -m perf                      # Slow perf test (5M rows, opt-in)
-
-# Verify data survival
-python -c "from fcmr_core.catalog import store; store.init_catalog()" # Twice → no data loss
+# Publish (local → GitHub → Vercel auto-deploy)
+git add -A && git commit -m "…" && git push origin main
 ```
 
+Remotes: `origin` = `GirishMGK/FCMR` (push target), `upstream` = `ihbsandeepreddy/FCMR`.
+
 ---
 
-## Configuration
+## 16. UI & design system
 
-Environment variables (or defaults in `fcmr_core/config.py`):
+Server-rendered Jinja2 with one global stylesheet: `app/web/static/css/main.css`. The shell
+is `templates/base.html`: a fixed **left sidebar** (logo + vertical nav + logout) and a
+**topbar** (page title + per-page actions) wrapping scrollable `.page-content`. This warm
+theme is the reference design for the user's other tools.
 
-```bash
-FCMR_DATA_DIR              # Base data directory (default: ./data)
-FCMR_AADHAAR_HASH_SALT    # Salt for Aadhaar hashing (keep secret, ~32 chars)
-FCMR_SESSION_SECRET       # FastAPI session secret (keep secret, ~32 chars)
-FCMR_MAX_UPLOAD_BYTES     # File size limit (default: 2 GB = 2147483648)
-FCMR_ROWS_PER_CHUNK       # Streaming chunk size (default: 10000)
+**Theme — "warm beige + terracotta"** (all colors are CSS custom properties in `:root`,
+mostly `oklch`):
+- Surfaces: `--bg` beige canvas, `--sidebar-bg`, white `--surface` cards, `--border`.
+- Accent: terracotta `--accent` / `--accent-h` / `--accent-light` / `--nav-active-bg`.
+- Status: `--ok-* / --warn-* / --err-* / --blue-*` (green/amber/red/blue pairs).
+- Radius `8px`, soft `--shadow`.
+
+**Typography** (Google Fonts, loaded in `base.html`):
+- **DM Sans** — body/UI. **Lora** (serif) — headings, card titles, stat values.
+- **IBM Plex Mono** — numbers, codes, IDs, timestamps (`.mono`).
+
+**Component vocabulary (reuse these classes, don't invent new ones):**
+- Layout: `.sidebar`, `.nav-item`(`.active`), `.main-area`, `.topbar`, `.page-content`.
+- Content: `.card` (`.card-title`/`.card-sub`/`.card-error`), `.stat-row`/`.stat-card`
+  (`.stat-ok`/`.stat-warn`), `.page-header`.
+- Controls: `.btn` (`.btn-primary`/`.btn-ghost`/`.btn-run`/`.btn-dl`/`.btn-sm`),
+  `.form-group`, `.file-drop`, `.col-select`.
+- Data: `.data-table`, `.badge` (status `.badge-ready/-running/-completed/-failed/-OK/-WARN/
+  -ERROR`, plus `.badge-type` and category badges), `.mono`, `.exc-bar-*`.
+- States: `.empty-state`, `.notice` (`.notice-warn`/`.notice-err`), `.spinner`.
+
+**UI conventions:**
+- Report-type labels: render `ead_files` as **"EAD Files"**, otherwise `title()` the
+  underscored name (see `index.html`/`upload.html`).
+- Sidebar nav highlights via `request.url.path` checks; keep new pages consistent.
+- Brand string is **"SanGir Automations"** (logo at `/static/img/sangir-logo.png`); the repo
+  name "FCMR" is internal only.
+- Upload UX: client picks file → if > 4 MB and Blob configured, browser uploads to Vercel Blob
+  and registers the URL; else standard XHR with a progress bar.
+
+**When adding UI:** extend `base.html`, fill `page_title`/`topbar_actions`/`content` blocks,
+reuse existing classes and CSS variables (no hard-coded hex, no new fonts), and keep pages
+server-rendered.
+
+---
+
+## 18. Known limitations & scaling notes
+
+- **O(n²) hot spots.** `ucid.py` (pairwise `_should_connect`) and `duplicates.py::
+  address_duplicate` (nested row loop) are quadratic. The "5M-row" claim in the old spec is
+  **not realistic** for these. Real ceiling today is ~tens of thousands of `customer_master`
+  rows. Treat large-scale customer_master as future work (blocking/keying before pairwise).
+- **Row-wise Python loops** in most rules (not vectorized Polars) — correct but not fast.
+- **Vercel data is ephemeral** (`/tmp`) — not a system of record (see §1.5).
+- **`requirements.txt` is a subset** of `pyproject.toml` — currently missing `openpyxl` and
+  `pyarrow`. Workpaper/EAD Excel export and some Parquet paths can fail on Vercel until these
+  are added. (Fix: align `requirements.txt` with `pyproject.toml` deps.)
+- **No change-password / user management** despite the first-login notice; single hard-coded
+  `admin`.
+- **Analytics is customer_master-only**; other report types ingest but have no rules.
+- **Test coverage gaps**: no UCID or sampling tests.
+
+---
+
+## 20. Decision log
+
+| Decision | Rationale | Don't reverse without confirming |
+|---|---|---|
+| **No LLM/AI; deterministic only** | Audit defensibility & reproducibility | Core product promise |
+| **Store row data in DuckDB tables, delete Parquet/CSV after ingest** | Single durable store; survives restart locally; simpler than managing parquet dirs | Changing this touches `store.py`, `uploads.py`, `runs.py`, `ead_consolidate.py` |
+| **Additive-only catalog migrations** | `git pull` must never destroy local audit data | Hard rule |
+| **Aadhaar: salted SHA-256 + masked display** | Legal/privacy; dedup without exposure | Hard rule |
+| **Seeded stratified sampling (`SHA256(eng:run)`)** | Reproducible, defensible sample | Hard rule |
+| **Column mapping = difflib, threshold-gated, profile-cached** | Deterministic, learns per header signature | — |
+| **Vercel = ephemeral demo only** | 4.5 MB body limit + no persistent disk | Don't market Vercel as durable |
+| **Warm beige + terracotta, DM Sans/Lora/IBM Plex Mono, sidebar+topbar shell** | House style; reference UI for sibling tools | Keep consistent across tools |
+| **htmx + server-rendered Jinja2, no SPA** | Keep logic in Python, low complexity | — |
+| **Brand "SanGir Automations"; "FCMR" internal** | Product identity | — |
+
+---
+
+## 22. Change checklist by layer
+
+When a change request comes in, walk this list and touch every box that applies, then report
+what changed:
+
+- [ ] **Schema** (`fcmr_core/schemas/*.yaml`) — new/renamed canonical fields, aliases, required.
+- [ ] **Rules** (`fcmr_core/rules/*`) — new rule + `@register` + import in `_ensure_rules_loaded`;
+      new numeric field? update `_NUMERIC_CANONICALS`.
+- [ ] **Severity/colors** — `sampling/stratification.py::_SEVERITY_MAP`, `reporting/charts.py`,
+      `reporting/workpaper.py` source-doc map.
+- [ ] **Catalog** (`catalog/store.py`) — new column? add via guarded `ALTER TABLE … ADD COLUMN`
+      (never drop); add CRUD.
+- [ ] **API** (`app/api/*`) — route + session/engagement scoping + login gating.
+- [ ] **Templates** (`app/web/templates/*`) — extend `base.html`, reuse blocks.
+- [ ] **CSS** (`static/css/main.css`) — reuse variables/classes; no new hex/fonts.
+- [ ] **Config** (`config.py`) — new `FCMR_*` setting + default; surface at `/settings` if live-tunable.
+- [ ] **Deps** — update **both** `pyproject.toml` and `requirements.txt`.
+- [ ] **Tests** (`tests/`) — add/extend; keep ruff + black clean.
+- [ ] **This doc** — update the affected section(s) and, if a principle changed, §20.
+
+---
+
+## 23. Glossary
+
+- **Engagement** — one audit job; scopes uploads/runs; selected into the session.
+- **Upload** — one ingested CSV (rows live in a `data_<id>` DuckDB table).
+- **Run** — one execution of the rule pipeline over an upload → wide/long CSVs.
+- **UCID** — Unique Customer Identifier; union-find group across matching identifiers.
+- **LAN** — Loan Account Number; distinguishes legitimate same-person-multiple-loan rows.
+- **Wide / Long CSV** — per-record vs per-exception output shapes.
+- **EAD** — Exposure At Default (ECL/Ind AS 109 context); `ead_files` is the consolidation flow.
+- **Workpaper** — the 4-sheet Excel audit deliverable with the sampled, sign-off-ready rows.
 ```
-
----
-
-## Testing Strategy
-
-### Unit Tests
-- `test_kyc_format.py` — Pan, Aadhaar, Voter ID, Passport, DL, mobile, email, DOB format validators
-- `test_duplicates.py` — Duplicate detection with LAN scoping
-- `test_ucid.py` — Union-find grouping, KYC consistency
-- `test_pin_master.py` — PIN existence, state/district match
-- `test_sampling.py` — Stratification, ICAI table, seeded selection
-
-Each test uses curated fixtures (valid/invalid values, edge cases).
-
-### Integration Tests
-- Upload → ingest → map → run → wide CSV
-- Verify all 27 rules execute
-- Verify Aadhaar is hashed (not full) in output
-- Verify wide CSV + long CSV generated
-
-### Perf Test (marked `@pytest.mark.perf`)
-- Generate synthetic 5M-row customer master with seeded defects
-- Run full pipeline → verify exceptions match seed
-- Assert peak memory < 8 GB on 15 GB machine
-
-### Data Survival Test
-- Call `init_catalog()` twice → assert all rows preserved
-- Verify schema is additive (only `ALTER TABLE ... ADD COLUMN`, no `DROP`)
-
----
-
-## Known Limitations & Future Work
-
-- **Single admin** — No role-based access control (doable in Phase 8)
-- **Desktop-only** — Not multi-tenant SaaS (no API key auth, no multi-workspace isolation beyond engagement)
-- **Local file storage** — No S3/cloud sync (keeps data on laptop; git never touches `data/`)
-- **Column mapping** — Deterministic fuzzy match via difflib; not ML-based (intentional for auditability)
-- **Sampling** — ICAI table hard-coded; not configurable per engagement (doable)
-
----
-
-## Deployment
-
-### Single-User Desktop (Only Supported Model)
-
-1. **Clone repo:**
-   ```bash
-   git clone https://github.com/ihbsandeepreddy/FCMR.git
-   cd FCMR
-   ```
-
-2. **Install:**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   pip install -e .
-   ```
-
-3. **Run:**
-   ```bash
-   uvicorn app.main:app
-   ```
-
-4. **Access:**
-   - Open http://localhost:8000
-   - Login: admin / admin123
-
-5. **Persistence:**
-   - `data/` directory (gitignored) persists across restarts
-   - `data/catalog.duckdb` is the single source of truth
-   - `git pull` never deletes user data (additive migrations only)
-
-### Multi-User? Cloud? Not supported.
-- Engagement model is per-user (no collaboration)
-- No API key auth or OAuth
-- No containerization or k8s
-- No S3 or cloud storage
-- If needed: fork and redesign auth/catalog (beyond scope of SanGir Automations)
-
----
-
-## Common Tasks
-
-### Add a New Rule
-1. Create function in appropriate module (e.g., `rules/email.py`)
-2. Decorate with `@register(rule_id, description)`
-3. Function signature: `rule(df: pl.DataFrame) -> pl.DataFrame`
-4. Return df with 3 new columns: `_exc_{rule_id}_status`, `_exc_{rule_id}_code`, `_exc_{rule_id}_desc`
-5. Import in `rules/registry.py`
-6. Test with fixtures
-
-### Add a New Report Type
-1. Create YAML in `schemas/` (e.g., `disbursement.yaml`)
-2. List canonical fields + aliases + required/dtype
-3. Reference in ingestion logic
-4. Column mapping auto-detects on upload
-
-### Update Schema Safely
-- Only `CREATE TABLE IF NOT EXISTS` or `ALTER TABLE ... ADD COLUMN`
-- Never `DROP COLUMN` or `DROP TABLE`
-- Test: run `init_catalog()` twice, assert data preserved
-
-### Deploy to Another Machine
-- Same process: clone, venv, pip install, uvicorn
-- Copy `data/` directory to new machine (if migrating data)
-- Or start fresh with new `data/` directory
-
----
-
-## References
-
-- **ICAI Audit Sampling Guidance** — 95% confidence attribute table
-- **ISA 530** — Audit Sampling (IAASB international standard)
-- **RBI KYC Guidelines** — Know Your Customer requirements for NBFC
-- **NFRA Fraud Risk Indicators** — Focus areas for loan audit
-- **India Post PIN Master** — Bundled reference data
-
----
-
-## License & Attribution
-
-This product was built as Phase 0–6 of SanGir Automations by Sandeep Reddy (ihbsandeepreddy@gmail.com) with Claude Code assistance.
-
-**Last updated:** 2026-06-18
