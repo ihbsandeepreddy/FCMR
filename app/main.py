@@ -71,6 +71,21 @@ class VersionMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# Download cookie middleware — set dl_done cookie when a file download begins
+class DownloadCookieMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        dl_token = request.query_params.get("dl_token")
+        if (
+            dl_token
+            and response.headers.get("content-disposition", "").startswith("attachment")
+        ):
+            response.set_cookie(
+                f"dl_done={dl_token}", value="1", path="/", max_age=20
+            )
+        return response
+
+
 # Login requirement middleware
 class LoginRequiredMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -90,6 +105,7 @@ class LoginRequiredMiddleware(BaseHTTPMiddleware):
 app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.add_middleware(VersionMiddleware)
+app.add_middleware(DownloadCookieMiddleware)
 
 # Static files
 _static_dir = settings.base_dir / "app" / "web" / "static"

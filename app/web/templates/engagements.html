@@ -38,7 +38,7 @@
         </div>
       </div>
       <div class="form-actions" style="margin-top: 12px;">
-        <button type="submit" class="btn btn-primary">Create Engagement</button>
+        <button type="submit" class="btn btn-primary" data-loading-text="Creating…">Create Engagement</button>
         <button type="button" class="btn btn-ghost" onclick="toggleCreateForm()">Cancel</button>
       </div>
     </form>
@@ -72,7 +72,7 @@
       </div>
 
       <form method="POST" action="/set-active/{{ eng.engagement_id }}">
-        <button type="submit" class="btn btn-primary" style="width: 100%;">
+        <button type="submit" class="btn btn-primary" style="width: 100%;" data-loading-text="Opening…">
           Open Engagement
         </button>
       </form>

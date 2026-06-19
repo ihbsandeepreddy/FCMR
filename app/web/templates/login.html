@@ -115,7 +115,7 @@
           <label for="password">Password</label>
           <input type="password" id="password" name="password" required>
         </div>
-        <button type="submit" class="submit-btn">Sign In</button>
+        <button type="submit" class="submit-btn" id="login-btn">Sign In</button>
       </form>
 
       <div class="help-text">
@@ -123,5 +123,16 @@
       </div>
     </div>
   </div>
+
+  <script>
+  document.querySelector('form').addEventListener('submit', function(e) {
+    var btn = document.getElementById('login-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.65';
+      btn.textContent = 'Signing in…';
+    }
+  });
+  </script>
 </body>
 </html>

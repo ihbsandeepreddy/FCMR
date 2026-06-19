@@ -33,7 +33,7 @@
         <p class="help-text" style="margin-top:8px;">Column mapping required before analytics can run.</p>
       {% elif upload.status == "ready" %}
         <form method="POST" action="/uploads/{{ upload.upload_id }}/run" id="run_form">
-          <button type="submit" name="mode" value="all" class="btn btn-run">
+          <button type="submit" name="mode" value="all" class="btn btn-run" data-loading-text="Starting…">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
               <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
@@ -62,7 +62,7 @@
               </div>
             </div>
             {% endfor %}
-            <button type="submit" class="btn btn-sm btn-primary" style="width:100%; margin-top:12px;">Run Selected Rules</button>
+            <button type="submit" class="btn btn-sm btn-primary" style="width:100%; margin-top:12px;" data-loading-text="Starting…">Run Selected Rules</button>
           </div>
         </form>
         <script>

@@ -44,7 +44,7 @@ async def update_setting(request: Request):
     )
 
 
-@router.post("/settings/backup")
+@router.get("/settings/backup")
 async def backup_data(request: Request):
     """Create and download a backup of catalog + outputs."""
     try:

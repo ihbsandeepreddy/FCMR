@@ -124,5 +124,85 @@
 
   </div>
 
+  <!-- ═══ LOADING OVERLAY ═══ -->
+  <div id="app-loading-overlay" class="app-overlay">
+    <div class="app-overlay-box">
+      <div class="spinner"></div>
+      <div class="app-overlay-box-message" id="app-loading-msg">Loading…</div>
+    </div>
+  </div>
+
+  <script>
+  window.FCMRLoading = {
+    overlay: function(msg) {
+      var overlay = document.getElementById('app-loading-overlay');
+      var msgEl = document.getElementById('app-loading-msg');
+      if (overlay) {
+        msgEl.textContent = msg || 'Loading…';
+        overlay.classList.add('visible');
+      }
+    },
+    hide: function() {
+      var overlay = document.getElementById('app-loading-overlay');
+      if (overlay) {
+        overlay.classList.remove('visible');
+      }
+    }
+  };
+
+  // Auto-bind form submits
+  (function() {
+    document.querySelectorAll('form').forEach(function(form) {
+      form.addEventListener('submit', function(e) {
+        var btn = e.submitter || form.querySelector('button[type="submit"]');
+        if (btn && !btn.hasAttribute('data-no-loading')) {
+          var loadingText = btn.getAttribute('data-loading-text') || 'Processing…';
+          btn.classList.add('is-loading');
+          btn.disabled = true;
+          btn.textContent = loadingText;
+        }
+      });
+    });
+
+    // Auto-bind data-loading-overlay links
+    document.querySelectorAll('a[data-loading-overlay]').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        var msg = this.getAttribute('data-loading-overlay');
+        window.FCMRLoading.overlay(msg);
+      });
+    });
+
+    // Auto-bind data-download links with download-cookie technique
+    document.querySelectorAll('a[data-download]').forEach(function(link) {
+      link.addEventListener('click', function(e) {
+        var msg = this.getAttribute('data-loading') || 'Generating…';
+        var href = this.href;
+
+        // Generate random token
+        var token = Math.random().toString(36).substr(2, 9);
+        var sep = href.indexOf('?') !== -1 ? '&' : '?';
+        this.href = href + sep + 'dl_token=' + token;
+
+        window.FCMRLoading.overlay(msg);
+
+        // Poll for download cookie
+        var pollCount = 0;
+        var pollInterval = setInterval(function() {
+          pollCount++;
+          if (document.cookie.indexOf('dl_done=' + token) !== -1) {
+            clearInterval(pollInterval);
+            document.cookie = 'dl_done=' + token + '; path=/; max-age=0';
+            window.FCMRLoading.hide();
+          }
+          if (pollCount > 50) { // ~20s timeout
+            clearInterval(pollInterval);
+            window.FCMRLoading.hide();
+          }
+        }, 400);
+      });
+    });
+  })();
+  </script>
+
 </body>
 </html>
