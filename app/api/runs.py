@@ -39,6 +39,18 @@ _templates_dir = Path(__file__).parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
 
 
+@router.get("/runs", response_class=HTMLResponse)
+async def runs_list(request: Request):
+    engagement_id = request.session.get("engagement_id")
+    runs = store.list_runs_for_engagement(engagement_id) if engagement_id else []
+    has_running = any(r["status"] in ("running", "pending") for r in runs)
+    return templates.TemplateResponse(
+        request=request,
+        name="runs_list.html",
+        context={"runs": runs, "has_running": has_running},
+    )
+
+
 @router.post("/uploads/{upload_id}/run")
 async def start_run(
     upload_id: str,

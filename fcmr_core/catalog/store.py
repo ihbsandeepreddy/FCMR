@@ -309,6 +309,23 @@ def get_run(run_id: str) -> dict | None:
     return dict(zip(cols, rows[0]))
 
 
+def list_runs_for_engagement(engagement_id: str) -> list[dict]:
+    """Return all runs for an engagement, joined with upload filename, newest first."""
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT r.*, u.filename, u.report_type, u.row_count
+            FROM runs r
+            LEFT JOIN uploads u ON r.upload_id = u.upload_id
+            WHERE r.engagement_id = ?
+            ORDER BY r.started_at DESC
+            """,
+            [engagement_id],
+        ).fetchall()
+        cols = [d[0] for d in con.description]
+    return [dict(zip(cols, row)) for row in rows]
+
+
 # ---------------------------------------------------------------------------
 # User CRUD
 # ---------------------------------------------------------------------------

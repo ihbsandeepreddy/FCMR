@@ -60,7 +60,7 @@
         Column Mapping
       </a>
 
-      <a href="/dashboard" class="nav-item {% if request.url.path.startswith('/runs/') %}active{% endif %}">
+      <a href="/runs" class="nav-item {% if request.url.path == '/runs' or request.url.path.startswith('/runs/') %}active{% endif %}">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
           <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.4" fill="none" opacity=".6"/>
           <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="currentColor"/>

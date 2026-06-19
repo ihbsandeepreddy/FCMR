@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Analytics Runs — SanGir Automations{% endblock %}
+{% block page_title %}Data Analytics{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/dashboard" class="btn btn-ghost" style="margin-left:auto;">← Dashboard</a>
+{% endblock %}
+
+{% block content %}
+
+{% if not runs %}
+<div class="empty-state">
+  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="margin-bottom:12px; opacity:.35;">
+    <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="2"/>
+    <path d="M15 20L20 15L25 20M20 15V26" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div style="font-weight:600; margin-bottom:6px;">No analytics runs yet</div>
+  <div class="help-text">Go to the Dashboard, open an upload, and click <strong>Run Analytics</strong>.</div>
+  <a href="/dashboard" class="btn btn-primary" style="margin-top:16px;">← Dashboard</a>
+</div>
+
+{% else %}
+
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between;">
+    <div>
+      <div class="card-title" style="margin-bottom:0;">Analytics Runs</div>
+      <div style="font-size:12px; color:var(--muted); margin-top:3px;">{{ runs | length }} run{{ 's' if runs | length != 1 else '' }} in this engagement</div>
+    </div>
+    {% if has_running %}
+    <span class="badge badge-running" id="live-badge" style="font-size:11px;">● Live</span>
+    {% endif %}
+  </div>
+
+  <table class="data-table" style="margin-bottom:0;">
+    <thead>
+      <tr>
+        <th>Run</th>
+        <th>Upload / File</th>
+        <th>Type</th>
+        <th>Rows</th>
+        <th>Status</th>
+        <th>Started</th>
+        <th>Finished</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="runs-tbody">
+      {% for run in runs %}
+      <tr id="row-{{ run.run_id }}">
+        <td class="mono" style="font-size:12px;">{{ run.run_id[:8] }}…</td>
+        <td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ run.filename or '—' }}">
+          {{ run.filename or '—' }}
+        </td>
+        <td>
+          {% if run.report_type %}
+          <span class="badge badge-type">{{ run.report_type.replace('_',' ').title() }}</span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="mono right">{{ "{:,}".format(run.row_count) if run.row_count else '—' }}</td>
+        <td>
+          <span class="badge badge-{{ run.status }}" id="status-{{ run.run_id }}">
+            {{ run.status }}
+          </span>
+          {% if run.status in ['running', 'pending'] %}
+          <div style="margin-top:5px; height:4px; background:var(--border); border-radius:3px; width:120px; overflow:hidden;">
+            <div id="bar-{{ run.run_id }}"
+                 style="height:100%; width:{{ run.progress_pct or 0 }}%;
+                        background:oklch(55% 0.18 260); border-radius:3px;
+                        transition:width 0.5s ease;">
+            </div>
+          </div>
+          <div style="font-size:11px; color:var(--muted); margin-top:3px;" id="pct-{{ run.run_id }}">
+            {{ run.progress_pct or 0 }}%
+          </div>
+          {% endif %}
+        </td>
+        <td class="timestamp mono" style="font-size:12px; white-space:nowrap;">
+          {{ run.started_at[:16].replace('T',' ') if run.started_at else '—' }}
+        </td>
+        <td class="timestamp mono" style="font-size:12px; white-space:nowrap;">
+          {{ run.finished_at[:16].replace('T',' ') if run.finished_at else '—' }}
+        </td>
+        <td style="text-align:right;">
+          <a href="/runs/{{ run.run_id }}" class="btn btn-sm btn-ghost">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+
+{% if has_running %}
+<script>
+(function () {
+  // Poll status of all in-progress runs every 2 seconds
+  const runningIds = [
+    {% for run in runs %}{% if run.status in ['running', 'pending'] %}"{{ run.run_id }}",{% endif %}{% endfor %}
+  ];
+
+  const active = new Set(runningIds);
+
+  function pollAll() {
+    if (active.size === 0) {
+      document.getElementById('live-badge').style.display = 'none';
+      return;
+    }
+    active.forEach(function (rid) {
+      fetch('/runs/' + rid + '/status')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          // Update mini progress bar
+          const bar = document.getElementById('bar-' + rid);
+          const pct = document.getElementById('pct-' + rid);
+          const badge = document.getElementById('status-' + rid);
+          if (bar) bar.style.width = (data.progress_pct || 0) + '%';
+          if (pct) pct.textContent = (data.progress_pct || 0) + '%';
+          if (badge) badge.textContent = data.status;
+
+          if (data.status !== 'running' && data.status !== 'pending') {
+            active.delete(rid);
+            // Refresh the row to show final state cleanly
+            if (badge) {
+              badge.className = 'badge badge-' + data.status;
+              badge.textContent = data.status;
+            }
+            if (bar) bar.parentElement.remove();
+            if (pct) pct.remove();
+          }
+        })
+        .catch(function () {});
+    });
+    setTimeout(pollAll, 2000);
+  }
+
+  pollAll();
+})();
+</script>
+{% endif %}
+
+{% endblock %}
