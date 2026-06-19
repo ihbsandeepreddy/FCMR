@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import sys
@@ -35,6 +36,19 @@ _DUCK_LIMITS = {
 
 # On Vercel the filesystem is read-only except /tmp
 _ON_VERCEL = bool(os.environ.get("VERCEL"))
+
+
+def _read_version() -> str:
+    """Read version from package.json."""
+    try:
+        pkg_path = Path(__file__).resolve().parent.parent / "package.json"
+        if pkg_path.exists():
+            with open(pkg_path) as f:
+                pkg = json.load(f)
+                return pkg.get("version", "0.1.0")
+    except Exception:
+        pass
+    return "0.1.0"
 
 
 class Settings(BaseSettings):
@@ -76,8 +90,15 @@ class Settings(BaseSettings):
     # Session secret for signed cookies; persisted in data/ so sessions survive restarts
     session_secret: str = ""
 
+    # Application version (read from package.json)
+    version: str = ""
+
     def __init__(self, **data):
         super().__init__(**data)
+
+        # Read version from package.json
+        if not self.version:
+            self.version = _read_version()
 
         # Resolve data_dir based on deployment environment
         if _ON_VERCEL:

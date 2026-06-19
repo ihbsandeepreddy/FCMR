@@ -63,6 +63,13 @@ def _ensure_initialized() -> None:
         _initialized = True
 
 
+# Version injection middleware
+class VersionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        request.state.app_version = settings.version
+        return await call_next(request)
+
+
 # Login requirement middleware
 class LoginRequiredMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -81,6 +88,7 @@ class LoginRequiredMiddleware(BaseHTTPMiddleware):
 # Add middlewares in reverse order (last added = innermost = runs first)
 app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
+app.add_middleware(VersionMiddleware)
 
 # Static files
 _static_dir = settings.base_dir / "app" / "web" / "static"
