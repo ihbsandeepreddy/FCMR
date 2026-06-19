@@ -1,6 +1,6 @@
 {
   "name": "sangir-automations",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "SanGir Automations — Deterministic audit analytics for NBFC loan portfolios",
   "author": "Sandeep Reddy <ihbsandeepreddy@gmail.com>",
   "license": "Apache-2.0",
