@@ -159,6 +159,21 @@ def init_catalog() -> None:
             )
         """)
 
+        # EAD analytics runs (separate from KYC rules-based runs)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS ead_runs (
+                run_id        TEXT PRIMARY KEY,
+                engagement_id TEXT REFERENCES engagements(engagement_id),
+                status        TEXT NOT NULL DEFAULT 'pending',
+                started_at    TEXT,
+                finished_at   TEXT,
+                output_dir    TEXT,
+                error         TEXT,
+                progress_step TEXT,
+                progress_pct  INTEGER
+            )
+        """)
+
         # Create a default engagement for existing uploads
         try:
             con.execute(
@@ -619,6 +634,50 @@ def init_settings() -> None:
     for key, value in defaults.items():
         if not get_setting(key):
             set_setting(key, value)
+
+
+# ---------------------------------------------------------------------------
+# EAD Run CRUD
+# ---------------------------------------------------------------------------
+
+
+def create_ead_run(engagement_id: str) -> str:
+    rid = str(uuid.uuid4())
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO ead_runs (run_id, engagement_id, status) VALUES (?, ?, 'pending')",
+            [rid, engagement_id],
+        )
+    return rid
+
+
+def update_ead_run(run_id: str, **kwargs) -> None:
+    allowed = {"status", "started_at", "finished_at", "output_dir", "error", "progress_step", "progress_pct"}
+    fields = {k: v for k, v in kwargs.items() if k in allowed}
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    with _conn() as con:
+        con.execute(f"UPDATE ead_runs SET {sets} WHERE run_id=?", [*fields.values(), run_id])
+
+
+def get_ead_run(run_id: str) -> dict | None:
+    with _conn() as con:
+        rows = con.execute("SELECT * FROM ead_runs WHERE run_id=?", [run_id]).fetchall()
+        if not rows:
+            return None
+        cols = [d[0] for d in con.description]
+    return dict(zip(cols, rows[0]))
+
+
+def list_ead_runs(engagement_id: str) -> list[dict]:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT * FROM ead_runs WHERE engagement_id=? ORDER BY started_at DESC NULLS LAST",
+            [engagement_id],
+        ).fetchall()
+        cols = [d[0] for d in con.description]
+    return [dict(zip(cols, r)) for r in rows]
 
 
 def _now() -> str:

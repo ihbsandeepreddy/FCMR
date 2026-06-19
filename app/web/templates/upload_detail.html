@@ -34,17 +34,50 @@
       {% if upload.status == "mapping_pending" %}
         <a href="/dashboard/uploads/{{ upload.upload_id }}/map-columns" class="btn btn-primary">Map Columns →</a>
         <p class="help-text" style="margin-top:8px;">Column mapping required before analytics can run.</p>
+
       {% elif upload.status == "ready" %}
-        <form method="POST" action="/uploads/{{ upload.upload_id }}/run" id="run_form">
-          <button type="submit" name="mode" value="all" class="btn btn-run" data-loading-text="Starting…">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-              <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
-              <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
-            </svg>
-            Run Analytics
-          </button>
-        </form>
-        <a href="/runs" class="btn btn-ghost" style="margin-top:10px; display:inline-block; font-size:13px;">Configure analysis (select categories) →</a>
+        {# Preview button — available for all report types #}
+        <a href="/dashboard/uploads/{{ upload.upload_id }}/preview" class="btn btn-ghost" style="margin-bottom:10px; display:inline-flex; align-items:center; gap:6px;">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.4" fill="none"/>
+            <circle cx="8" cy="8" r="2" fill="currentColor"/>
+          </svg>
+          Preview Data (500 rows)
+        </a>
+
+        {% if upload.report_type == "customer_master" %}
+          {# KYC rules-based analytics #}
+          <form method="POST" action="/uploads/{{ upload.upload_id }}/run" id="run_form">
+            <button type="submit" name="mode" value="all" class="btn btn-run" data-loading-text="Starting…">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
+                <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
+              </svg>
+              Run Analytics
+            </button>
+          </form>
+          <a href="/runs" class="btn btn-ghost" style="margin-top:10px; display:inline-block; font-size:13px;">Configure analysis (select categories) →</a>
+
+        {% elif upload.report_type == "ead_files" %}
+          {# EAD analytics — engagement-scoped #}
+          <form method="POST" action="/ead/analyze" style="margin-top:6px;">
+            <button type="submit" class="btn btn-run" style="display:inline-flex; align-items:center; gap:6px;">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
+                <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
+              </svg>
+              Run EAD Analytics
+            </button>
+          </form>
+          <p class="help-text" style="margin-top:8px;">Runs on all ready EAD files in this engagement.</p>
+
+        {% else %}
+          {# Other report types — no rules-based analytics yet #}
+          <div class="notice" style="margin-top:6px;">
+            No rule-based analytics for <strong>{{ upload.report_type.replace("_"," ").title() }}</strong>. Use Preview to inspect data.
+          </div>
+        {% endif %}
+
       {% elif upload.status == "failed" %}
         <p class="error-text" style="font-size:13px;">Ingestion failed. Please re-upload the file.</p>
       {% endif %}
@@ -100,6 +133,48 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+{% endif %}
+
+{# ── EAD Analytics runs (shown only for ead_files uploads) ── #}
+{% if upload.report_type == "ead_files" and ead_runs %}
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px;">
+    <div class="card-title" style="margin-bottom:0;">EAD Analytics Runs</div>
+    <form method="POST" action="/ead/analyze" style="margin-left:auto;">
+      <button type="submit" class="btn btn-sm btn-run">▶ New Run</button>
+    </form>
+  </div>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Run ID</th>
+        <th>Status</th>
+        <th>Started</th>
+        <th>Finished</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in ead_runs %}
+      <tr>
+        <td class="mono" style="font-size:11px;">{{ r.run_id[:8] }}…</td>
+        <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+        <td class="timestamp">{{ r.started_at[:16].replace("T"," ") if r.started_at else "—" }}</td>
+        <td class="timestamp">{{ r.finished_at[:16].replace("T"," ") if r.finished_at else "—" }}</td>
+        <td style="text-align:right;">
+          <a href="/ead/runs/{{ r.run_id }}" class="btn btn-sm btn-ghost">View →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif upload.report_type == "ead_files" and upload.status == "ready" %}
+<div class="card empty-state" style="padding:28px 24px;">
+  <div class="empty-icon">📊</div>
+  <h2>No EAD analytics runs yet</h2>
+  <p>Go to <a href="/dashboard/ead/consolidate">EAD Consolidate</a> and click <strong>Run EAD Analytics</strong>.</p>
 </div>
 {% endif %}
 

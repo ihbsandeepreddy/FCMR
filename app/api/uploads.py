@@ -14,6 +14,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+import polars as pl
+
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import ingest_csv, sniff_headers
@@ -378,6 +380,8 @@ async def do_map_columns(request: Request, upload_id: str):
 
 @router.get("/uploads/{upload_id}", response_class=HTMLResponse)
 async def upload_detail(request: Request, upload_id: str):
+    from fcmr_core.rules.registry import list_categories
+
     upload = store.get_upload(upload_id)
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
@@ -391,6 +395,12 @@ async def upload_detail(request: Request, upload_id: str):
         source_files = json.loads(upload["source_files_json"])
 
     runs = store.list_runs(upload_id)
+    categories = list_categories()
+
+    # EAD analytics runs (engagement-scoped)
+    engagement_id = request.session.get("engagement_id")
+    ead_runs = store.list_ead_runs(engagement_id) if engagement_id else []
+
     return templates.TemplateResponse(
         request=request,
         name="upload_detail.html",
@@ -399,5 +409,43 @@ async def upload_detail(request: Request, upload_id: str):
             "runs": runs,
             "mapping_display": mapping_display,
             "source_files": source_files,
+            "categories": categories,
+            "ead_runs": ead_runs,
+        },
+    )
+
+
+@router.get("/uploads/{upload_id}/preview", response_class=HTMLResponse)
+async def preview_upload(request: Request, upload_id: str):
+    upload = store.get_upload(upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if upload["status"] != "ready":
+        return RedirectResponse(url=f"/dashboard/uploads/{upload_id}", status_code=303)
+
+    try:
+        df = store.get_upload_df(upload_id)
+        preview_df = df.head(500).with_columns(
+            [pl.col(c).cast(pl.Utf8, strict=False) for c in df.columns]
+        )
+        preview_cols = preview_df.columns
+        preview_rows = preview_df.rows()
+        col_count = len(preview_cols)
+        row_count = len(preview_rows)
+    except Exception:
+        preview_cols = []
+        preview_rows = []
+        col_count = 0
+        row_count = 0
+
+    return templates.TemplateResponse(
+        request=request,
+        name="upload_preview.html",
+        context={
+            "upload": upload,
+            "preview_cols": preview_cols,
+            "preview_rows": preview_rows,
+            "col_count": col_count,
+            "row_count": row_count,
         },
     )

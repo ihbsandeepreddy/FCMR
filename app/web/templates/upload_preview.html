@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Preview — {{ upload.filename }} — SanGir Automations{% endblock %}
+{% block page_title %}Data Preview{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/dashboard/uploads/{{ upload.upload_id }}" class="btn btn-ghost" style="margin-left:auto;">← Back to Upload</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom:12px;">
+  <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+    <div>
+      <div class="card-title" style="font-size:15px; margin-bottom:4px;">{{ upload.filename }}</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+        <span class="badge badge-type">{{ "EAD Files" if upload.report_type == "ead_files" else upload.report_type.replace("_"," ").title() }}</span>
+        <span class="badge badge-ready">ready</span>
+        <span class="mono" style="font-size:11px; color:var(--muted);">{{ "{:,}".format(upload.row_count) if upload.row_count else "?" }} total rows</span>
+      </div>
+    </div>
+    <div class="notice" style="margin-left:auto; padding:8px 14px; font-size:12px; border-radius:6px;">
+      Showing first {{ col_count }} columns × {{ row_count }} rows
+      {% if upload.row_count and upload.row_count > 500 %}
+        (of {{ "{:,}".format(upload.row_count) }} total)
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if preview_cols %}
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="overflow:auto; max-height:72vh;">
+    <table class="data-table" style="font-size:12px; white-space:nowrap;">
+      <thead>
+        <tr>
+          <th style="position:sticky;left:0;z-index:2;background:var(--surface);">#</th>
+          {% for col in preview_cols %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>
+          <td class="mono" style="position:sticky;left:0;z-index:1;background:var(--surface);color:var(--muted);font-size:11px;">{{ loop.index }}</td>
+          {% for val in row %}
+          <td class="mono">{{ val if val is not none and val != "None" and val != "" else "—" }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if upload.row_count and upload.row_count > 500 %}
+  <div style="padding:10px 16px; font-size:12px; color:var(--muted); border-top:1px solid var(--border);">
+    Preview limited to 500 rows. Download the full exception CSV from a completed run for all data.
+  </div>
+  {% endif %}
+</div>
+{% else %}
+<div class="card empty-state">
+  <div class="empty-icon">📂</div>
+  <h2>No data to preview</h2>
+  <p>The upload data could not be loaded. It may not have been ingested yet.</p>
+</div>
+{% endif %}
+
+{% endblock %}

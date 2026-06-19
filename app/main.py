@@ -14,6 +14,7 @@ from app.api import (
     blob_upload,
     consolidate,
     downloads,
+    ead_analytics,
     engagements,
     runs,
     system,
@@ -136,3 +137,6 @@ app.include_router(blob_upload.router, prefix="", tags=["blob"])
 
 # Schema reconciliation + consolidated-data downloads — require login
 app.include_router(consolidate.router, prefix="", tags=["consolidate"])
+
+# EAD Analytics — require login
+app.include_router(ead_analytics.router, prefix="", tags=["ead_analytics"])

@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% block title %}EAD Analytics Run — SanGir Automations{% endblock %}
+{% block page_title %}EAD Analytics{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/dashboard/ead/consolidate" class="btn btn-ghost" style="margin-left:auto;">← EAD Consolidate</a>
+{% endblock %}
+
+{% block head %}
+<style>
+  .tab-bar { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:16px; }
+  .tab-btn {
+    padding:6px 14px; font-size:12px; font-weight:500; border-radius:6px; cursor:pointer;
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+    transition:background 0.15s, color 0.15s;
+  }
+  .tab-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+  .report-preview { max-height:420px; overflow:auto; }
+  .mismatch-row { background:rgba(220,53,69,0.08) !important; }
+  .dl-bar { display:flex; align-items:center; gap:10px; padding:12px 0; border-top:1px solid var(--border); margin-top:12px; flex-wrap:wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# ── Run status card ── #}
+<div class="card" style="margin-bottom:16px;">
+  <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+    <div>
+      <div class="card-title" style="margin-bottom:4px;">EAD Portfolio Analytics</div>
+      <span class="mono" style="font-size:11px; color:var(--muted);">Run {{ run.run_id[:8] }}…</span>
+    </div>
+    <div style="margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span class="badge badge-{{ run.status }}">{{ run.status }}</span>
+      {% if run.started_at %}
+      <span class="timestamp" style="font-size:12px;">Started {{ run.started_at[:16].replace("T"," ") }} UTC</span>
+      {% endif %}
+      {% if run.finished_at %}
+      <span class="timestamp" style="font-size:12px;">Finished {{ run.finished_at[:16].replace("T"," ") }} UTC</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ── Running state ── #}
+{% if run.status in ("pending", "running") %}
+<div class="card" id="running-card">
+  <div style="display:flex; align-items:center; gap:14px; margin-bottom:20px;">
+    <div class="spinner"></div>
+    <div>
+      <div style="font-weight:600;">EAD Analytics running…</div>
+      <div id="progress-step" style="font-size:13px; color:var(--muted); margin-top:2px;">Initialising</div>
+    </div>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:6px;">
+    <span>Progress</span>
+    <span id="progress-pct-label">0%</span>
+  </div>
+  <div style="background:var(--row-alt); border-radius:6px; height:10px; overflow:hidden;">
+    <div id="progress-bar"
+         style="height:100%; width:0%; background:var(--accent); border-radius:6px; transition:width 0.4s ease;"></div>
+  </div>
+
+  <p class="help-text" style="margin-top:14px;">
+    13 reports are being computed in sequence. This page will refresh automatically when done.
+  </p>
+</div>
+
+<script>
+(function poll() {
+  fetch('/ead/runs/{{ run.run_id }}/status')
+    .then(r => r.json())
+    .then(data => {
+      const pct = data.progress_pct || 0;
+      document.getElementById('progress-bar').style.width = pct + '%';
+      document.getElementById('progress-pct-label').textContent = pct + '%';
+      if (data.progress_step) document.getElementById('progress-step').textContent = data.progress_step;
+      if (data.status === 'completed' || data.status === 'failed') {
+        window.location.reload();
+      } else {
+        setTimeout(poll, 1500);
+      }
+    })
+    .catch(() => setTimeout(poll, 3000));
+})();
+</script>
+{% endif %}
+
+{# ── Failed state ── #}
+{% if run.status == "failed" %}
+<div class="card card-error">
+  <div class="card-title">Analytics Failed</div>
+  <p style="font-size:13px; margin-top:8px;">{{ run.error or "An unknown error occurred." }}</p>
+  <div style="margin-top:16px;">
+    <form method="POST" action="/ead/analyze" style="display:inline;">
+      <button type="submit" class="btn btn-primary">Retry</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{# ── Completed state ── #}
+{% if run.status == "completed" %}
+
+{# Stat cards #}
+{% if summary %}
+<div class="stat-row" style="margin-bottom:20px;">
+  <div class="stat-card">
+    <div class="stat-label">Total Loans</div>
+    <div class="stat-value mono">{{ "{:,}".format(summary.total_loans) if summary.total_loans else "—" }}</div>
+    <div class="stat-meta">agreements</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total EAD</div>
+    <div class="stat-value mono">
+      {% if summary.total_ead %}
+        {% if summary.total_ead >= 10000000 %}
+          ₹{{ "%.2f Cr"|format(summary.total_ead / 10000000) }}
+        {% elif summary.total_ead >= 100000 %}
+          ₹{{ "%.2f L"|format(summary.total_ead / 100000) }}
+        {% else %}
+          {{ "{:,.0f}".format(summary.total_ead) }}
+        {% endif %}
+      {% else %}—{% endif %}
+    </div>
+    <div class="stat-meta">exposure at default</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Provision</div>
+    <div class="stat-value mono">
+      {% if summary.total_provision %}
+        {% if summary.total_provision >= 10000000 %}
+          ₹{{ "%.2f Cr"|format(summary.total_provision / 10000000) }}
+        {% elif summary.total_provision >= 100000 %}
+          ₹{{ "%.2f L"|format(summary.total_provision / 100000) }}
+        {% else %}
+          {{ "{:,.0f}".format(summary.total_provision) }}
+        {% endif %}
+      {% else %}—{% endif %}
+    </div>
+    <div class="stat-meta">ECL provision</div>
+  </div>
+  <div class="stat-card {% if summary.coverage_pct and summary.coverage_pct < 5 %}stat-warn{% endif %}">
+    <div class="stat-label">Coverage %</div>
+    <div class="stat-value mono">{{ "%.2f%%"|format(summary.coverage_pct) if summary.coverage_pct else "—" }}</div>
+    <div class="stat-meta">provision / EAD</div>
+  </div>
+</div>
+{% endif %}
+
+{# Tab bar #}
+{% set tab_list = [
+  ("pivot",           "Pivot Report"),
+  ("stage_summary",   "Stage Summary"),
+  ("dpd_summary",     "DPD Buckets"),
+  ("stage_dpd",       "Stage × DPD"),
+  ("product",         "Product"),
+  ("geographic",      "Geography"),
+  ("security",        "Sec vs Unsec"),
+  ("writeoff",        "Write-Off"),
+  ("sbu",             "SBU"),
+  ("provision_check", "Provision Check"),
+  ("negative_check",  "Negative Values"),
+  ("stage_mismatch",  "Mismatch"),
+  ("fvtpl",           "FVTPL"),
+] %}
+
+<div class="tab-bar" id="tab-bar">
+  {% for key, label in tab_list %}
+  <button class="tab-btn {% if loop.first %}active{% endif %}"
+          onclick="switchTab('{{ key }}')" id="btn-{{ key }}">
+    {{ label }}
+    {% if previews and previews[key] and previews[key].get("rows") %}
+      {% set cnt = previews[key].total_rows %}
+      {% if cnt %}<span style="font-size:10px; opacity:.7; margin-left:4px;">({{ cnt }})</span>{% endif %}
+    {% endif %}
+  </button>
+  {% endfor %}
+</div>
+
+{# Tab panels #}
+{% for key, label in tab_list %}
+<div class="tab-panel {% if loop.first %}active{% endif %}" id="panel-{{ key }}">
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div style="padding:14px 20px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div class="card-title" style="margin-bottom:0;">{{ label }}</div>
+      {% if previews and previews[key] %}
+        {% set p = previews[key] %}
+        {% if p.get("missing") %}
+          <span class="badge" style="background:var(--row-alt); color:var(--muted);">Not available</span>
+        {% elif p.total_rows > 0 %}
+          <span class="badge badge-type">{{ "{:,}".format(p.total_rows) }} rows</span>
+          <a href="/ead/runs/{{ run.run_id }}/download/{{ key }}"
+             class="btn btn-sm btn-dl" style="margin-left:auto;">
+            ↓ CSV
+          </a>
+        {% endif %}
+      {% endif %}
+    </div>
+
+    {% if previews and previews[key] and previews[key].get("cols") %}
+      {% set p = previews[key] %}
+      {% if p.rows %}
+      <div class="report-preview">
+        <table class="data-table" style="font-size:12px;">
+          <thead>
+            <tr>
+              {% for col in p.cols %}
+              <th style="white-space:nowrap;">{{ col }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in p.rows %}
+            <tr {% if key == "stage_mismatch" %}class="mismatch-row"{% endif %}>
+              {% for val in row %}
+              <td class="mono" style="white-space:nowrap;">{{ val if val is not none and val != "None" else "—" }}</td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if p.total_rows > 50 %}
+      <div style="padding:10px 16px; font-size:12px; color:var(--muted); border-top:1px solid var(--border);">
+        Showing first 50 of {{ "{:,}".format(p.total_rows) }} rows — download CSV for full data.
+      </div>
+      {% endif %}
+      {% else %}
+      <div class="empty-state" style="padding:24px;">
+        <div class="empty-icon">—</div>
+        <p>{{ p.cols[0] if p.cols else "No data for this report." }}</p>
+      </div>
+      {% endif %}
+    {% else %}
+    <div class="empty-state" style="padding:24px;">
+      <div class="empty-icon">—</div>
+      <p>No data available for this report.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+{# Workpaper download #}
+<div class="card" style="margin-top:8px;">
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+    <div>
+      <div class="card-title" style="margin-bottom:4px;">Full Analytics Workpaper</div>
+      <div class="card-sub">All 13 reports in one Excel file — terracotta-formatted headers, one sheet per report.</div>
+    </div>
+    {% if workpaper_available %}
+    <a href="/ead/runs/{{ run.run_id }}/download/workpaper" class="btn btn-primary btn-dl">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-right:4px;">
+        <rect x="2" y="11" width="12" height="3.5" rx="1.5" fill="white" opacity=".7"/>
+        <path d="M8 9.5V2M5 7l3 2.5L11 7" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+      Download Workpaper (.xlsx)
+    </a>
+    {% else %}
+    <span class="badge" style="background:var(--row-alt); color:var(--muted);">Workpaper not available</span>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}{# end completed #}
+
+<script>
+function switchTab(key) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('btn-' + key).classList.add('active');
+  document.getElementById('panel-' + key).classList.add('active');
+}
+</script>
+
+{% endblock %}

@@ -222,19 +222,36 @@
     // ── Small file path: standard XHR upload through the server ──────────────
     const xhr = new XMLHttpRequest();
 
+    // Compute file count + total size for multi-file progress label
+    const folderFiles = document.getElementById("folder").files;
+    const filesFiles  = document.getElementById("files").files;
+    const allFiles    = [...folderFiles, ...filesFiles];
+    const fileCount   = allFiles.length;
+    const totalMB     = (allFiles.reduce((s, f) => s + f.size, 0) / 1048576).toFixed(1);
+
     xhr.upload.addEventListener("progress", function(ev) {
       if (ev.lengthComputable) {
         const pct = Math.round((ev.loaded / ev.total) * 100);
         progressBar.style.width = pct + "%";
         progressPct.textContent = pct + "%";
-        if (pct === 100) progressLabel.textContent = "Processing on server…";
+        if (pct === 100) {
+          progressLabel.textContent = fileCount > 1
+            ? `Processing ${fileCount} files on server…`
+            : "Processing on server…";
+        } else {
+          progressLabel.textContent = fileCount > 1
+            ? `Uploading ${fileCount} files (${totalMB} MB)…`
+            : "Uploading…";
+        }
       }
     });
 
     xhr.upload.addEventListener("load", function() {
       progressBar.style.width = "100%";
       progressPct.textContent = "100%";
-      progressLabel.textContent = "Processing on server…";
+      progressLabel.textContent = fileCount > 1
+        ? `Processing ${fileCount} files on server…`
+        : "Processing on server…";
     });
 
     xhr.addEventListener("load", function() {
