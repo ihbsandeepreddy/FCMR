@@ -374,6 +374,20 @@ async def do_map_columns(request: Request, upload_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Delete upload
+# ---------------------------------------------------------------------------
+
+
+@router.post("/uploads/{upload_id}/delete")
+async def delete_upload(upload_id: str):
+    upload = store.get_upload(upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    store.delete_upload(upload_id)
+    return RedirectResponse(url="/dashboard", status_code=303)
+
+
+# ---------------------------------------------------------------------------
 # Upload detail
 # ---------------------------------------------------------------------------
 

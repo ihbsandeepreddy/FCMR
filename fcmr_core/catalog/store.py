@@ -496,6 +496,31 @@ def list_engagements() -> list[dict]:
     return [dict(zip(cols, r)) for r in rows]
 
 
+def delete_upload(upload_id: str) -> None:
+    """Delete an upload and its associated data table and runs."""
+    with _conn() as con:
+        # Collect run output dirs before deleting rows
+        run_rows = con.execute(
+            "SELECT wide_csv, long_csv, workpaper_path FROM runs WHERE upload_id=?", [upload_id]
+        ).fetchall()
+        con.execute("DELETE FROM runs WHERE upload_id=?", [upload_id])
+        table_name = f"data_{upload_id.replace('-', '_')}"
+        con.execute(f"DROP TABLE IF EXISTS {table_name}")
+        con.execute("DELETE FROM uploads WHERE upload_id=?", [upload_id])
+    # Clean up output files on disk
+    from fcmr_core.config import settings
+    for row in run_rows:
+        for path_str in row:
+            if path_str:
+                from pathlib import Path
+                p = Path(path_str)
+                p.unlink(missing_ok=True)
+                try:
+                    p.parent.rmdir()
+                except Exception:
+                    pass
+
+
 def list_uploads(engagement_id: str | None = None) -> list[dict]:
     with _conn() as con:
         if engagement_id:

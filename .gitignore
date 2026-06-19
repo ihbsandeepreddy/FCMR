@@ -52,6 +52,9 @@ htmlcov/
 # Ruff / Black cache
 .ruff_cache/
 
+# Local Claude Code settings (personal hooks, not for team)
+.claude/settings.local.json
+
 # Server logs
 uvicorn.log
 uvicorn_err.log
