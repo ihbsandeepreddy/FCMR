@@ -283,9 +283,18 @@ async def export_workpaper(run_id: str):
     if not run or run["status"] != "completed" or not run["wide_csv"] or not run["long_csv"]:
         raise HTTPException(status_code=404, detail="Run not found or not completed")
 
-    engagement = store.get_engagement(run["engagement_id"])
+    # Lookup engagement; use "default" as fallback if missing or not found
+    engagement_id = run.get("engagement_id") or "default"
+    engagement = store.get_engagement(engagement_id)
     if not engagement:
-        raise HTTPException(status_code=404, detail="Engagement not found")
+        # Create a minimal engagement object if not found
+        engagement = {
+            "engagement_id": engagement_id,
+            "name": "Audit Engagement",
+            "client_name": "—",
+            "period_from": None,
+            "period_to": None,
+        }
 
     wide_path = Path(run["wide_csv"])
     long_path = Path(run["long_csv"])
