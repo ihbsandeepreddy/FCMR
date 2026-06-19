@@ -70,11 +70,8 @@ def get_sample_size(
     expected_deviation = exception_count / population if population > 0 else 0
 
     # Find matching entry in table
-    for (pop_min, pop_max), sample_size in _ICAI_TABLE.items():
-        if pop_min <= population <= pop_max and 0 <= expected_deviation <= (
-            tolerable_deviation * 2
-        ):
-            # Return sample size, capped at population
+    for ((pop_min, pop_max), (dev_min, dev_max)), sample_size in _ICAI_TABLE.items():
+        if pop_min <= population <= pop_max and dev_min <= expected_deviation < dev_max:
             return min(sample_size, population)
 
     # Fallback: conservative estimate (sqrt of population)
