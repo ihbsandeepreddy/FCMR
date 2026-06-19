@@ -32,27 +32,31 @@
 {# ── Running / pending state ── #}
 {% if run.status in ["running", "pending"] %}
 <div class="card" id="running-card">
-  <div class="running-indicator" style="align-items:flex-start; gap:16px;">
+  <div style="display:flex; align-items:flex-start; gap:16px;">
     <div class="spinner" style="margin-top:3px; flex-shrink:0;"></div>
     <div style="flex:1;">
       <strong style="font-size:14px;">Analytics running…</strong>
-      <p class="help-text" style="margin-top:4px; margin-bottom:14px;">
+      <p class="help-text" style="margin-top:4px; margin-bottom:16px;">
         Processing all rows through KYC format, duplicate, PIN and address checks.
       </p>
 
-      {# Step progress #}
-      <div style="display:flex; flex-direction:column; gap:6px;" id="steps-list">
-        {% set steps = ["Loading data file", "Running 27 validation rules", "Building exception reports"] %}
-        {% for s in steps %}
-        <div class="step-row" data-step="{{ s }}" style="display:flex; align-items:center; gap:10px; font-size:13px;">
-          <span class="step-icon" style="width:18px; text-align:center; color:var(--muted);">○</span>
-          <span style="color:var(--muted);">{{ s }}</span>
+      {# Progress bar #}
+      <div style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+          <span id="step-label" style="font-size:12.5px; color:var(--fg); font-weight:500;">Starting…</span>
+          <span id="pct-label" style="font-size:12.5px; color:var(--muted); font-weight:600;">0%</span>
         </div>
-        {% endfor %}
+        <div style="background:var(--border,#e5e7eb); border-radius:6px; height:10px; overflow:hidden;">
+          <div id="progress-bar"
+               style="height:100%; width:0%; background:oklch(55% 0.18 260); border-radius:6px;
+                      transition:width 0.5s ease, background 0.3s ease;">
+          </div>
+        </div>
       </div>
 
-      <div style="margin-top:16px;">
-        <button id="stop-btn" onclick="stopRun()" class="btn btn-sm" style="background:oklch(55% 0.18 25); color:#fff; border:none;">
+      <div>
+        <button id="stop-btn" onclick="stopRun()" class="btn btn-sm"
+                style="background:oklch(55% 0.18 25); color:#fff; border:none;">
           Stop
         </button>
       </div>
@@ -63,37 +67,25 @@
 <script>
 (function () {
   const RUN_ID = "{{ run.run_id }}";
-  const STEPS = ["Loading data file", "Running 27 validation rules", "Building exception reports"];
 
-  function markStep(currentStep) {
-    STEPS.forEach(function (s) {
-      const row = document.querySelector('[data-step="' + s + '"]');
-      if (!row) return;
-      const icon = row.querySelector('.step-icon');
-      const label = row.querySelector('span:last-child');
-      if (s === currentStep) {
-        icon.textContent = '▶';
-        icon.style.color = 'oklch(55% 0.18 260)';
-        label.style.color = 'var(--fg)';
-        label.style.fontWeight = '600';
-      } else if (STEPS.indexOf(s) < STEPS.indexOf(currentStep)) {
-        icon.textContent = '✓';
-        icon.style.color = 'oklch(55% 0.18 145)';
-        label.style.color = 'var(--muted)';
-        label.style.textDecoration = 'line-through';
-      }
-    });
+  function updateProgress(pct, label) {
+    const bar  = document.getElementById('progress-bar');
+    const pctEl = document.getElementById('pct-label');
+    const lblEl = document.getElementById('step-label');
+    if (bar)   bar.style.width = pct + '%';
+    if (bar && pct >= 100) bar.style.background = 'oklch(55% 0.18 145)';
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (lblEl && label) lblEl.textContent = label;
   }
 
   function poll() {
     fetch('/runs/' + RUN_ID + '/status')
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        if (data.progress_step) markStep(data.progress_step);
+        updateProgress(data.progress_pct || 0, data.progress_step || '');
         if (data.status === 'running' || data.status === 'pending') {
-          setTimeout(poll, 1500);
+          setTimeout(poll, 1200);
         } else {
-          // Reload once to show final state (completed / failed / cancelled)
           window.location.reload();
         }
       })

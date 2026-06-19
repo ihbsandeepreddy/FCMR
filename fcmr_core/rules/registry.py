@@ -22,6 +22,7 @@ from typing import Callable
 import polars as pl
 
 RuleFn = Callable[[pl.DataFrame], pl.DataFrame]
+ProgressFn = Callable[[int, int, str], None]  # (completed, total, rule_id)
 
 
 @dataclass
@@ -48,11 +49,21 @@ def list_rules() -> list[RuleMeta]:
     return list(_REGISTRY)
 
 
-def run_pipeline(df: pl.DataFrame) -> pl.DataFrame:
-    """Run all registered rules in registration order, returning an annotated frame."""
+def run_pipeline(
+    df: pl.DataFrame,
+    on_progress: ProgressFn | None = None,
+) -> pl.DataFrame:
+    """Run all registered rules in registration order, returning an annotated frame.
+
+    on_progress(completed, total, rule_id) is called after each rule if provided.
+    It may raise an exception to abort the pipeline early (e.g. on cancellation).
+    """
     _ensure_rules_loaded()
-    for meta in _REGISTRY:
+    total = len(_REGISTRY)
+    for idx, meta in enumerate(_REGISTRY):
         df = meta.fn(df)
+        if on_progress:
+            on_progress(idx + 1, total, meta.rule_id)
     return df
 
 

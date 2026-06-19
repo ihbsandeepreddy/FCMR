@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,8 +27,11 @@ logger = get_logger("processing")
 router = APIRouter()
 
 # In-memory set of run IDs that have been requested to cancel.
-# Checked between pipeline steps in _run_analytics.
 _cancel_requests: set[str] = set()
+
+
+class _RunCancelled(Exception):
+    """Raised by the on_progress callback when a cancel is requested mid-pipeline."""
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
 
@@ -67,30 +71,35 @@ async def run_status(run_id: str):
     return JSONResponse({
         "status": run["status"],
         "progress_step": run.get("progress_step") or "",
+        "progress_pct": run.get("progress_pct") or 0,
         "error": run.get("error") or "",
     })
 
 
 def _run_analytics(run_id: str, upload_id: str) -> None:
     """Execute the full analytics pipeline and update the catalog when done."""
-    def _step(label: str) -> bool:
-        """Update progress step. Returns True if cancelled."""
+
+    def _check_cancel() -> None:
+        """Raise _RunCancelled if a stop was requested."""
         if run_id in _cancel_requests:
-            _cancel_requests.discard(run_id)
-            store.update_run(run_id, status="cancelled", finished_at=_now(),
-                             error="Stopped by user.")
-            logger.info("job_cancelled run_id=%s", run_id)
-            return True
-        store.update_run(run_id, progress_step=label)
-        return False
+            raise _RunCancelled()
+
+    def _on_rule_progress(completed: int, total: int, rule_id: str) -> None:
+        """Called by run_pipeline after each rule. Updates DB with real % progress."""
+        _check_cancel()
+        # Rules span 5% → 90% of the total progress range.
+        pct = 5 + int((completed / total) * 85)
+        label = f"Rule {completed}/{total}: {rule_id.replace('_', ' ')}"
+        store.update_run(run_id, progress_step=label, progress_pct=pct)
 
     try:
         upload = store.get_upload(upload_id)
         logger.info("job_start run_id=%s upload_id=%s", run_id, upload_id)
 
-        if _step("Loading data file"): return
-        # Data is stored in DuckDB after ingestion (parquet is deleted post-import).
-        # Fall back to reading from parquet path only if the DuckDB table is missing.
+        _check_cancel()
+        store.update_run(run_id, progress_step="Loading data file", progress_pct=2)
+
+        # Data lives in DuckDB after ingestion; parquet is deleted post-import.
         try:
             df = store.get_upload_df(upload_id)
         except Exception:
@@ -102,19 +111,26 @@ def _run_analytics(run_id: str, upload_id: str) -> None:
                 )
             df = read_parquet(parquet_path).collect()
 
-        # Cast every column to string. DuckDB infers numeric-looking fields
-        # (mobile, pincode, bank_account) as Int64; all rules expect str values.
+        # Cast every column to string up-front. DuckDB infers numeric-looking
+        # fields (mobile, pincode, bank_account) as Int64; all rules expect str.
         df = df.with_columns([
             pl.col(c).cast(pl.Utf8, strict=False) for c in df.columns
         ])
         logger.info("job_loaded run_id=%s rows=%d", run_id, len(df))
 
-        if _step("Running 27 validation rules"): return
-        annotated = run_pipeline(df)
+        store.update_run(run_id, progress_step="Starting validation rules…", progress_pct=5)
+        annotated = run_pipeline(df, on_progress=_on_rule_progress)
 
-        if _step("Building exception reports"): return
+        # Release the input frame and rule-annotated columns we no longer need.
+        del df
+        gc.collect()
+
+        store.update_run(run_id, progress_step="Building exception reports", progress_pct=90)
         out_dir = settings.outputs_dir / run_id
         wide_path, long_path = build_exception_csvs(annotated, run_id, out_dir)
+
+        del annotated
+        gc.collect()
 
         logger.info(
             "job_complete run_id=%s wide=%s long=%s", run_id, wide_path.name, long_path.name
@@ -126,7 +142,12 @@ def _run_analytics(run_id: str, upload_id: str) -> None:
             wide_csv=str(wide_path),
             long_csv=str(long_path),
             progress_step="Done",
+            progress_pct=100,
         )
+    except _RunCancelled:
+        _cancel_requests.discard(run_id)
+        store.update_run(run_id, status="cancelled", finished_at=_now(), error="Stopped by user.")
+        logger.info("job_cancelled run_id=%s", run_id)
     except Exception as exc:
         logger.error("job_failed run_id=%s error=%s", run_id, type(exc).__name__)
         store.update_run(run_id, status="failed", finished_at=_now(), error=str(exc))

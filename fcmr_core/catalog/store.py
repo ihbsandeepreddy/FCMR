@@ -89,6 +89,7 @@ def init_catalog() -> None:
             ("engagement_id", "TEXT"),
             ("workpaper_path", "TEXT"),
             ("progress_step", "TEXT"),
+            ("progress_pct", "INTEGER"),
         ]:
             try:
                 con.execute(f"ALTER TABLE runs ADD COLUMN {col} {dtype}")
@@ -249,7 +250,7 @@ def create_run(upload_id: str) -> str:
 
 
 def update_run(run_id: str, **kwargs: str | None) -> None:
-    allowed = {"status", "started_at", "finished_at", "wide_csv", "long_csv", "error", "workpaper_path", "progress_step"}
+    allowed = {"status", "started_at", "finished_at", "wide_csv", "long_csv", "error", "workpaper_path", "progress_step", "progress_pct"}
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return

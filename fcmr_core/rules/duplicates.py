@@ -329,31 +329,50 @@ def rule_voter_id_duplicate(df: pl.DataFrame) -> pl.DataFrame:
     return _annotate(df, "voter_id_duplicate", statuses, codes, descs)
 
 
-@register("address_duplicate", "Fuzzy address match (token-set Jaccard â‰¥0.85) across different customer IDs")
+@register("address_duplicate", "Fuzzy address match (token-set Jaccard ≥0.85) across different customer IDs")
 def rule_address_duplicate(df: pl.DataFrame) -> pl.DataFrame:
-    """Flag addresses that are fuzzy-similar (not exact duplicates)."""
-    addrs = _col_or_empty(df, "address_line1")
-    cids = _col_or_empty(df, "customer_id")
+    """Flag addresses that are fuzzy-similar using a token inverted-index.
 
-    statuses, codes, descs = [], [], []
-    for i, (cid, addr) in enumerate(zip(cids, addrs)):
-        addr = (addr or "").strip()
-        if not addr:
-            statuses.append("OK"); codes.append(""); descs.append("")
+    Replaces the O(n²) Python loop: builds an inverted index of 4+-char tokens,
+    finds candidate pairs sharing ≥3 tokens, then computes Jaccard only for those.
+    For typical address data this is O(n × avg_tokens) rather than O(n²).
+    """
+    addrs = _col_or_empty(df, "address_line1").to_list()
+    cids = _col_or_empty(df, "customer_id").to_list()
+
+    # Build inverted token index
+    tok_idx: dict[str, list[int]] = {}
+    for i, addr in enumerate(addrs):
+        normalized = (addr or "").strip().upper()
+        if not normalized:
             continue
+        tokens = {w for w in normalized.split() if len(w) >= 4}
+        for tok in tokens:
+            tok_idx.setdefault(tok, []).append(i)
 
-        # Check against all other rows
-        found_match = False
-        for j, (other_cid, other_addr) in enumerate(zip(cids, addrs)):
-            if i != j and (other_cid or "").strip():
-                other_addr = (other_addr or "").strip()
-                if other_addr and _address_similarity(addr, other_addr) >= 0.85:
-                    found_match = True
-                    statuses.append("WARN"); codes.append("ADDRESS_DUPLICATE")
-                    descs.append(f"Address is fuzzy-similar to another record (similarity â‰¥85%)")
-                    break
+    # Find candidate pairs sharing ≥3 tokens; skip very common tokens
+    pair_counts: dict[tuple[int, int], int] = {}
+    for bucket in tok_idx.values():
+        if len(bucket) > 500:
+            continue
+        for ii in range(len(bucket)):
+            for jj in range(ii + 1, len(bucket)):
+                p = (min(bucket[ii], bucket[jj]), max(bucket[ii], bucket[jj]))
+                pair_counts[p] = pair_counts.get(p, 0) + 1
 
-        if not found_match:
-            statuses.append("OK"); codes.append(""); descs.append("")
+    # Confirm candidates with actual Jaccard similarity
+    matched: set[int] = set()
+    for (i, j), count in pair_counts.items():
+        if count >= 3:
+            if _address_similarity(addrs[i], addrs[j]) >= 0.85:
+                if (cids[i] or "") != (cids[j] or ""):
+                    matched.add(i)
+                    matched.add(j)
 
+    statuses = ["WARN" if i in matched else "OK" for i in range(len(addrs))]
+    codes = ["ADDRESS_DUPLICATE" if i in matched else "" for i in range(len(addrs))]
+    descs = [
+        "Address is fuzzy-similar to another record (similarity ≥85%)" if i in matched else ""
+        for i in range(len(addrs))
+    ]
     return _annotate(df, "address_duplicate", statuses, codes, descs)
