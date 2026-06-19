@@ -45,7 +45,7 @@ app = FastAPI(
         "Audit Analytics & Automated Solutions — "
         "Deterministic KYC and data-quality analytics for NBFC loan audits."
     ),
-    version="0.1.0",
+    version=settings.version,
     lifespan=lifespan,
 )
 

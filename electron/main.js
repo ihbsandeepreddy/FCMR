@@ -66,7 +66,11 @@ async function spawnBackend() {
 
   const repoRoot = path.join(__dirname, "..");
   const args = isDev ? [path.join(repoRoot, "desktop_backend.py")] : [];
-  const env = { ...process.env, FCMR_BACKEND_PORT: String(BACKEND_PORT) };
+  const env = {
+    ...process.env,
+    FCMR_BACKEND_PORT: String(BACKEND_PORT),
+    FCMR_APP_VERSION: app.getVersion(),
+  };
 
   writeLog(`Spawning backend: ${backendExe} ${args.join(" ")}`);
 

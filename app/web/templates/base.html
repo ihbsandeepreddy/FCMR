@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Lora:wght@400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="/static/css/main.css?v={{ request.state.app_version }}" />
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   {% block head %}{% endblock %}
 </head>
@@ -116,7 +116,7 @@
   </div>
 
   <!-- ═══ LOADING OVERLAY ═══ -->
-  <div id="app-loading-overlay" class="app-overlay">
+  <div id="app-loading-overlay" class="app-overlay" style="display:none;">
     <div class="app-overlay-box">
       <div class="spinner"></div>
       <div class="app-overlay-box-message" id="app-loading-msg">Loading…</div>
@@ -130,13 +130,13 @@
       var msgEl = document.getElementById('app-loading-msg');
       if (overlay) {
         msgEl.textContent = msg || 'Loading…';
-        overlay.classList.add('visible');
+        overlay.style.display = 'flex';
       }
     },
     hide: function() {
       var overlay = document.getElementById('app-loading-overlay');
       if (overlay) {
-        overlay.classList.remove('visible');
+        overlay.style.display = 'none';
       }
     }
   };

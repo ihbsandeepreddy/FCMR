@@ -21,6 +21,8 @@ a = Analysis(
     pathex=[ROOT],
     binaries=[],
     datas=[
+        # Version file (read by config.py in frozen mode)
+        (os.path.join(ROOT, "package.json"), "."),
         # Web UI (Jinja2 templates, static assets)
         (os.path.join(ROOT, "app", "web", "templates"), "app/web/templates"),
         (os.path.join(ROOT, "app", "web", "static"), "app/web/static"),

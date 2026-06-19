@@ -39,15 +39,37 @@ _ON_VERCEL = bool(os.environ.get("VERCEL"))
 
 
 def _read_version() -> str:
-    """Read version from package.json."""
-    try:
-        pkg_path = Path(__file__).resolve().parent.parent / "package.json"
-        if pkg_path.exists():
-            with open(pkg_path) as f:
-                pkg = json.load(f)
-                return pkg.get("version", "0.1.0")
-    except Exception:
-        pass
+    """Read version from FCMR_APP_VERSION env, package.json, or fallback.
+
+    Priority:
+    1. FCMR_APP_VERSION env var (set by Electron)
+    2. package.json in sys._MEIPASS (frozen PyInstaller bundle)
+    3. package.json in repo root (dev mode)
+    4. Hardcoded fallback "0.1.0"
+    """
+    # Check env var first (Electron passes this)
+    if env_version := os.environ.get("FCMR_APP_VERSION"):
+        return env_version
+
+    # Try paths in order
+    paths_to_try = []
+
+    # Frozen bundle: look in sys._MEIPASS
+    if getattr(sys, "frozen", False):
+        paths_to_try.append(Path(sys._MEIPASS) / "package.json")
+
+    # Repo root (dev mode)
+    paths_to_try.append(Path(__file__).resolve().parent.parent / "package.json")
+
+    for pkg_path in paths_to_try:
+        try:
+            if pkg_path.exists():
+                with open(pkg_path) as f:
+                    pkg = json.load(f)
+                    return pkg.get("version", "0.1.0")
+        except Exception:
+            pass
+
     return "0.1.0"
 
 
