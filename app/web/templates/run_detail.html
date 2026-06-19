@@ -196,60 +196,63 @@
 </div>
 {% endif %}
 
-{# Exception codes table #}
-{% if summary.exception_codes %}
+{# Exception codes table — ALL codes (not just top 10) #}
+{% if summary.all_codes %}
 <div class="card" style="padding:0; overflow:hidden;">
   <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border);">
-    <div class="card-title" style="margin-bottom:0;">Exception Codes Detail</div>
+    <div class="card-title" style="margin-bottom:0;">Exception Codes Detail (All {{ summary.all_codes | length }} codes)</div>
+    <div style="font-size:12px; color:var(--muted); margin-top:4px;">Showing all exception types found in this analysis</div>
   </div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>Exception Code</th>
-        <th>Category</th>
-        <th style="text-align:right;">Count</th>
-        <th style="text-align:right; width:160px;">% of Total</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% set max_count = summary.top_codes[0]["count"] if summary.top_codes else 1 %}
-      {% for item in summary.top_codes %}
-      {% set pct = (item["count"] / summary.total * 100) if summary.total > 0 else 0 %}
-      {% set bar_pct = (item["count"] / max_count * 100) | round(0) | int %}
-      {% set code = item["exception_code"] %}
-      {% if "KYC" in code or "PAN" in code or "AADHAAR" in code or "DL" in code or "VOTER" in code or "PASSPORT" in code or "DOB" in code or "EMAIL" in code or "MOBILE" in code %}
-        {% set cat = "KYC Format" %}
-        {% set cat_class = "badge-cat-kyc" %}
-        {% set bar_color = "oklch(60% 0.16 40)" %}
-      {% elif "ADDR" in code or "PIN" in code %}
-        {% set cat = "Address" %}
-        {% set cat_class = "badge-cat-addr" %}
-        {% set bar_color = "oklch(58% 0.14 260)" %}
-      {% elif "DUP" in code %}
-        {% set cat = "Duplicates" %}
-        {% set cat_class = "badge-cat-dup" %}
-        {% set bar_color = "oklch(68% 0.15 82)" %}
-      {% else %}
-        {% set cat = "Other" %}
-        {% set cat_class = "badge-cat-other" %}
-        {% set bar_color = "oklch(58% 0.14 145)" %}
-      {% endif %}
-      <tr>
-        <td class="mono">{{ code }}</td>
-        <td><span class="badge {{ cat_class }}">{{ cat }}</span></td>
-        <td class="mono right">{{ "{:,}".format(item["count"]) }}</td>
-        <td>
-          <div class="exc-bar-wrap">
-            <div class="exc-bar-track">
-              <div class="exc-bar-fill" style="width:{{ bar_pct }}%; background:{{ bar_color }};"></div>
+  <div style="max-height:600px; overflow-y:auto; border-bottom:1px solid var(--border);">
+    <table class="data-table" style="margin-bottom:0;">
+      <thead style="position:sticky; top:0; background:var(--bg); z-index:1;">
+        <tr>
+          <th>Exception Code</th>
+          <th>Category</th>
+          <th style="text-align:right;">Count</th>
+          <th style="text-align:right; width:160px;">% of Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_count = summary.all_codes[0]["count"] if summary.all_codes else 1 %}
+        {% for item in summary.all_codes %}
+        {% set pct = (item["count"] / summary.total * 100) if summary.total > 0 else 0 %}
+        {% set bar_pct = (item["count"] / max_count * 100) | round(0) | int %}
+        {% set code = item["exception_code"] %}
+        {% if "KYC" in code or "PAN" in code or "AADHAAR" in code or "DL" in code or "VOTER" in code or "PASSPORT" in code or "DOB" in code or "EMAIL" in code or "MOBILE" in code %}
+          {% set cat = "KYC Format" %}
+          {% set cat_class = "badge-cat-kyc" %}
+          {% set bar_color = "oklch(60% 0.16 40)" %}
+        {% elif "ADDR" in code or "PIN" in code %}
+          {% set cat = "Address" %}
+          {% set cat_class = "badge-cat-addr" %}
+          {% set bar_color = "oklch(58% 0.14 260)" %}
+        {% elif "DUP" in code %}
+          {% set cat = "Duplicates" %}
+          {% set cat_class = "badge-cat-dup" %}
+          {% set bar_color = "oklch(68% 0.15 82)" %}
+        {% else %}
+          {% set cat = "Other" %}
+          {% set cat_class = "badge-cat-other" %}
+          {% set bar_color = "oklch(58% 0.14 145)" %}
+        {% endif %}
+        <tr>
+          <td class="mono">{{ code }}</td>
+          <td><span class="badge {{ cat_class }}">{{ cat }}</span></td>
+          <td class="mono right">{{ "{:,}".format(item["count"]) }}</td>
+          <td>
+            <div class="exc-bar-wrap">
+              <div class="exc-bar-track">
+                <div class="exc-bar-fill" style="width:{{ bar_pct }}%; background:{{ bar_color }};"></div>
+              </div>
+              <span class="exc-pct">{{ "%.1f"|format(pct) }}%</span>
             </div>
-            <span class="exc-pct">{{ "%.1f"|format(pct) }}%</span>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
 {% endif %}
 

@@ -176,18 +176,21 @@ async def run_detail(request: Request, run_id: str):
         wide_path = Path(run["wide_csv"])
         if wide_path.exists():
             status_counts = aggregate_status_counts(wide_path)
-            exception_codes = aggregate_exception_codes(wide_path, top_n=10)
+            # Get ALL exception codes (not just top 10)
+            all_exception_codes = aggregate_exception_codes(wide_path, top_n=None)
+            # Get top 10 for the bar chart (for readability)
+            top_exception_codes = aggregate_exception_codes(wide_path, top_n=10)
 
             donut_svg = build_donut_svg(status_counts, width=300, height=300)
-            bar_svg = build_bar_chart(exception_codes, width=700, height=400)
+            bar_svg = build_bar_chart(top_exception_codes, width=700, height=400)
 
             total = sum(status_counts.values())
-            top_codes = [{"exception_code": c, "count": n} for c, n in exception_codes.items()]
+            all_codes = [{"exception_code": c, "count": n} for c, n in all_exception_codes.items()]
             summary = {
                 "total": total,
                 "status_counts": status_counts,
-                "exception_codes": exception_codes,
-                "top_codes": top_codes,
+                "exception_codes": top_exception_codes,
+                "all_codes": all_codes,
             }
 
     return templates.TemplateResponse(
