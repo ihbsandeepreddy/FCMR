@@ -77,7 +77,7 @@ class DownloadCookieMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         dl_token = request.query_params.get("dl_token")
-        if dl_token and response.headers.get("content-disposition", "").startswith("attachment"):
+        if dl_token and response.status_code == 200:
             response.set_cookie(f"dl_done_{dl_token}", value="1", path="/", max_age=20)
         return response
 
