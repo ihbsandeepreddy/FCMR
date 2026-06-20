@@ -5,6 +5,7 @@ Generates a 4-sheet workpaper: Lead Sheet, Detailed Exceptions, TOC and TOD, Met
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from fcmr_core.reporting.aggregation import aggregate_exception_codes
+from fcmr_core.rules.registry import CATEGORIES, list_rules
+from fcmr_core.sampling.stratification import _SEVERITY_MAP
 
 
 def _sanitize_filename(text: str) -> str:
@@ -24,19 +27,93 @@ def _sanitize_filename(text: str) -> str:
     return text
 
 
+def _procedures_performed(run: dict, long_csv_path: Path) -> list[dict]:
+    """Return list of procedures (rules) that were run with metadata.
+
+    Returns: [{"rule_id": str, "description": str, "category": str,
+               "severity": str, "exceptions": int}, ...]
+    """
+    try:
+        # Determine which rules were run
+        selected_rules_json = run.get("selected_rules")
+        if selected_rules_json:
+            selected_rule_ids = json.loads(selected_rules_json)
+            rule_universe = [r for r in list_rules() if r.rule_id in selected_rule_ids]
+        else:
+            rule_universe = list(list_rules())
+
+        # Build category map
+        category_map = {}
+        for cat in CATEGORIES:
+            for rule_id in cat["rule_ids"]:
+                category_map[rule_id] = cat["label"]
+
+        # Read long CSV and count exceptions per rule
+        try:
+            long_df = pl.read_csv(long_csv_path, columns=["rule_id", "status"], infer_schema_length=0)
+            exception_counts = (
+                long_df.filter(pl.col("status") != "OK")
+                .group_by("rule_id")
+                .len()
+                .to_dicts()
+            )
+            exc_map = {d["rule_id"]: d["len"] for d in exception_counts}
+        except Exception:
+            exc_map = {}
+
+        # Build procedures list
+        procedures = []
+        for rule_meta in rule_universe:
+            rule_id = rule_meta.rule_id
+            category = category_map.get(rule_id, "—")
+            exceptions = exc_map.get(rule_id, 0)
+
+            # Severity: lookup highest severity code seen for this rule
+            severity = "—"
+            try:
+                long_df_rule = pl.read_csv(long_csv_path, infer_schema_length=0)
+                rule_codes = (
+                    long_df_rule.filter(pl.col("rule_id") == rule_id)["exception_code"]
+                    .unique()
+                    .to_list()
+                )
+                severities = [_SEVERITY_MAP.get(code, "LOW") for code in rule_codes]
+                sev_order = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "LOW": 0}
+                if severities:
+                    severity = max(severities, key=lambda s: sev_order.get(s, 0))
+            except Exception:
+                severity = "—"
+
+            procedures.append({
+                "rule_id": rule_id,
+                "description": rule_meta.description,
+                "category": category,
+                "severity": severity,
+                "exceptions": exceptions,
+            })
+
+        return procedures
+    except Exception:
+        return []
+
+
 def build_workpaper(
     engagement: dict,
     run: dict,
+    upload: dict,
     wide_csv_path: Path,
+    long_csv_path: Path,
     sample_records: list[dict],
     output_dir: Path,
 ) -> Path:
-    """Build a 4-sheet Excel workpaper.
+    """Build a 5-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology).
 
     Args:
         engagement: Engagement dict from store.
         run: Run dict from store.
+        upload: Upload dict from store (filename, row_count, ingested_at, etc.).
         wide_csv_path: Path to wide exception CSV.
+        long_csv_path: Path to long exception CSV.
         sample_records: List of sampled records from select_sample().
         output_dir: Directory to save the workpaper.
 
@@ -55,8 +132,8 @@ def build_workpaper(
 
     # Create workbook
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Lead Sheet"
+    ws_cover = wb.active
+    ws_cover.title = "Cover"
 
     # Styles
     header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
@@ -70,13 +147,27 @@ def build_workpaper(
         bottom=Side(style="thin"),
     )
 
+    # ── Sheet 0: Cover ──
+    _build_cover_sheet(
+        ws_cover,
+        run,
+        engagement,
+        wide_csv_path,
+        title_font,
+        subheader_font,
+        header_fill,
+        header_font,
+    )
+
     # ── Sheet 1: Lead Sheet ──
+    ws1 = wb.create_sheet("Lead Sheet")
     _build_lead_sheet(
-        ws,
+        ws1,
         engagement,
         run,
+        upload,
         wide_csv_path,
-        sample_records,
+        long_csv_path,
         header_fill,
         header_font,
         title_font,
@@ -103,12 +194,143 @@ def build_workpaper(
     return workpaper_path
 
 
+def _build_cover_sheet(
+    ws,
+    run,
+    engagement,
+    wide_csv_path,
+    title_font,
+    subheader_font,
+    header_fill,
+    header_font,
+):
+    """Build Cover sheet."""
+    row = 1
+    report_type = run.get("upload_id", "—")[:20]
+
+    # Title
+    ws[f"A{row}"] = "SanGir Automations — Audit Working Paper"
+    ws[f"A{row}"].font = title_font
+    row += 2
+
+    # W/P Reference and metadata
+    ws[f"A{row}"] = "W/P Reference:"
+    ws[f"B{row}"] = f"WP-{report_type}-{run.get('run_id', 'N/A')[:8]}"
+    row += 1
+
+    ws[f"A{row}"] = "Engagement:"
+    ws[f"B{row}"] = engagement.get("name", "N/A")
+    row += 1
+
+    ws[f"A{row}"] = "Client:"
+    ws[f"B{row}"] = engagement.get("client_name", "N/A")
+    row += 1
+
+    ws[f"A{row}"] = "Period:"
+    period_str = f"{engagement.get('period_from', '')} to {engagement.get('period_to', '')}"
+    ws[f"B{row}"] = period_str
+    row += 1
+
+    ws[f"A{row}"] = "Report Type:"
+    ws[f"B{row}"] = report_type
+    row += 1
+
+    try:
+        pop = len(pl.read_csv(wide_csv_path, infer_schema_length=0))
+        ws[f"A{row}"] = "Population (records):"
+        ws[f"B{row}"] = pop
+    except Exception:
+        pass
+    row += 1
+
+    ws[f"A{row}"] = "Date Prepared:"
+    ws[f"B{row}"] = datetime.now(UTC).strftime("%Y-%m-%d")
+    row += 2
+
+    # Sign-off block
+    ws[f"A{row}"] = "Prepared By:"
+    ws[f"B{row}"] = ""
+    ws[f"C{row}"] = ""
+    row += 1
+
+    ws[f"A{row}"] = "Signature:"
+    ws[f"B{row}"] = ""
+    ws[f"C{row}"] = ""
+    row += 1
+
+    ws[f"A{row}"] = "Date:"
+    ws[f"B{row}"] = ""
+    ws[f"C{row}"] = ""
+    row += 2
+
+    ws[f"A{row}"] = "Reviewed By:"
+    ws[f"B{row}"] = ""
+    ws[f"C{row}"] = ""
+    row += 1
+
+    ws[f"A{row}"] = "Signature:"
+    ws[f"B{row}"] = ""
+    ws[f"C{row}"] = ""
+    row += 1
+
+    ws[f"A{row}"] = "Date:"
+    ws[f"B{row}"] = ""
+    ws[f"C{row}"] = ""
+    row += 2
+
+    # Index of working papers
+    ws[f"A{row}"] = "Index of Working Papers"
+    ws[f"A{row}"].font = subheader_font
+    row += 1
+
+    headers = ["Sheet", "Purpose"]
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=row, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+    row += 1
+
+    sheets_info = [
+        ("Lead Sheet", "Summary, procedures & conclusion"),
+        ("Detailed Exceptions", "Full population with per-rule results"),
+        ("TOC and TOD", "Sample testing & sign-off"),
+        ("Methodology", "Sampling basis & ICFR control mapping"),
+    ]
+    for sheet_name, purpose in sheets_info:
+        ws[f"A{row}"] = sheet_name
+        ws[f"B{row}"] = purpose
+        row += 1
+
+    row += 1
+
+    # Tickmark legend
+    ws[f"A{row}"] = "Tickmark Legend"
+    ws[f"A{row}"].font = subheader_font
+    row += 1
+
+    tickmarks = [
+        "✓ = Agreed to source document, no exception",
+        "Ø = Exception noted",
+        "N/A = Not applicable",
+        "S = Selected for sample testing",
+    ]
+    for mark in tickmarks:
+        ws[f"A{row}"] = mark
+        row += 1
+
+    # Column widths
+    ws.column_dimensions["A"].width = 26
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 18
+
+
 def _build_lead_sheet(
     ws,
     engagement,
     run,
+    upload,
     wide_csv_path,
-    sample_records,
+    long_csv_path,
     header_fill,
     header_font,
     title_font,
@@ -134,6 +356,46 @@ def _build_lead_sheet(
 
     ws[f"A{row}"] = f"Audit Date: {datetime.now(UTC).strftime('%Y-%m-%d')}"
     row += 2
+
+    # Purpose & Objective
+    ws[f"A{row}"] = "Purpose & Objective"
+    ws[f"A{row}"].font = subheader_font
+    row += 1
+
+    purpose_text = (
+        "This engagement validates the customer_master KYC and data quality via deterministic rules "
+        "aligned with RBI Know Your Customer (KYC) Guidelines, ICAI Audit Sampling Guidance, and NFRA fraud-risk indicators."
+    )
+    ws[f"A{row}"] = purpose_text
+    ws[f"A{row}"].alignment = Alignment(wrap_text=True)
+    row += 2
+
+    # Population Reconciliation
+    ws[f"A{row}"] = "Source of Data / Population Reconciliation"
+    ws[f"A{row}"].font = subheader_font
+    row += 1
+
+    reconciliation_headers = ["Source File", "Rows Ingested", "Records Analyzed", "Difference", "Ingested At"]
+    for col_idx, header in enumerate(reconciliation_headers, 1):
+        cell = ws.cell(row=row, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+    row += 1
+
+    try:
+        wide_df = pl.read_csv(wide_csv_path, infer_schema_length=0)
+        analyzed = len(wide_df)
+        ingested = upload.get("row_count", analyzed)
+        difference = ingested - analyzed
+
+        ws[f"A{row}"] = upload.get("filename", "—")
+        ws[f"B{row}"] = ingested
+        ws[f"C{row}"] = analyzed
+        ws[f"D{row}"] = difference
+        ws[f"E{row}"] = (upload.get("ingested_at", "—")[:10] if upload.get("ingested_at") else "—")
+        row += 2
+    except Exception:
+        row += 2
 
     # Exception Summary
     ws[f"A{row}"] = "Exception Summary"
@@ -163,136 +425,144 @@ def _build_lead_sheet(
     except Exception:
         row += 4
 
-    # Verification Plan
-    ws[f"A{row}"] = "Verification Plan (Top Exception Codes)"
+    # Procedures Performed
+    ws[f"A{row}"] = "Procedures Performed"
     ws[f"A{row}"].font = subheader_font
     row += 1
 
-    # Headers
-    for col, header in enumerate(
-        ["Exception Code", "Frequency", "Source Document", "Compliance Point"], 1
-    ):
-        cell = ws.cell(row=row, column=col, value=header)
+    proc_headers = ["#", "Rule ID", "Audit Procedure (Description)", "Category", "Severity", "Exceptions", "Exception %"]
+    for col_idx, header in enumerate(proc_headers, 1):
+        cell = ws.cell(row=row, column=col_idx, value=header)
         cell.fill = header_fill
         cell.font = header_font
+    row += 1
+
+    try:
+        procedures = _procedures_performed(run, long_csv_path)
+        total_records = len(pl.read_csv(wide_csv_path, infer_schema_length=0))
+        for idx, proc in enumerate(procedures, 1):
+            ws[f"A{row}"] = idx
+            ws[f"B{row}"] = proc["rule_id"]
+            ws[f"C{row}"] = proc["description"]
+            ws[f"D{row}"] = proc["category"]
+            ws[f"E{row}"] = proc["severity"]
+            ws[f"F{row}"] = proc["exceptions"]
+            exc_pct = (proc["exceptions"] / total_records * 100) if total_records > 0 else 0
+            ws[f"G{row}"] = f"{exc_pct:.1f}%"
+            row += 1
+    except Exception:
+        pass
 
     row += 1
 
-    # All exception codes (no cap)
-    exception_codes = aggregate_exception_codes(wide_csv_path, top_n=None)
-    source_docs = {
-        # Duplicates
-        "PAN_DUPLICATE": "PAN Registration / KYC",
-        "AADHAAR_DUPLICATE": "Aadhaar Card / KYC",
-        "VOTER_ID_DUPLICATE": "Voter Card / KYC",
-        "MOBILE_DUPLICATE": "KYC Form / Mobile Verification",
-        "NAME_DOB_DUPLICATE": "ID Proof / KYC Application",
-        "ADDRESS_DUPLICATE": "Sanction Letter / Address Proof",
-        "BANK_ACCOUNT_DUPLICATE": "Bank Statement / Account Proof",
-        # KYC format
-        "PAN_INVALID_FORMAT": "PAN Card / KYC Application",
-        "PAN_INVALID_ENTITY_CHAR": "PAN Card / KYC Application",
-        "AADHAAR_INVALID_FORMAT": "Aadhaar Card / KYC",
-        "AADHAAR_INVALID_PREFIX": "Aadhaar Card / KYC",
-        "AADHAAR_CHECKSUM_FAIL": "Aadhaar Card / KYC",
-        "VOTER_ID_INVALID_FORMAT": "Voter Card / KYC",
-        "PASSPORT_INVALID_FORMAT": "Passport / KYC",
-        "DL_INVALID_FORMAT": "Driving Licence / KYC",
-        "DL_INVALID_STATE_CODE": "Driving Licence / KYC",
-        "MOBILE_INVALID_FORMAT": "KYC Form / Mobile Verification",
-        "EMAIL_INVALID_FORMAT": "KYC Form / Email Verification",
-        "EMAIL_COMPANY_GENERIC_DOMAIN": "KYC Form / Email Verification",
-        "DOB_INVALID_FORMAT": "ID Proof / Birth Certificate",
-        "DOB_FUTURE_DATE": "ID Proof / Birth Certificate",
-        "DOB_AGE_IMPLAUSIBLE": "ID Proof / Birth Certificate",
-        "DOB_AGE_TOO_YOUNG": "ID Proof / Birth Certificate",
-        "DOB_AGE_OUT_OF_RANGE": "ID Proof / Birth Certificate",
-        "BANK_ACCOUNT_INVALID_LENGTH": "Bank Statement / Account Details",
-        # PIN / Address
-        "PIN_INVALID_FORMAT": "KYC Form / Address Proof",
-        "PIN_NOT_FOUND": "KYC Form / Address Proof",
-        "STATE_PIN_MISMATCH": "KYC Form / Address Proof",
-        "DISTRICT_PIN_MISMATCH": "KYC Form / Address Proof",
-        "ADDRESS_INCOMPLETE": "KYC Form / Address Proof",
-        # Missing fields
-        "PAN_MISSING": "KYC Form / Application",
-        "AADHAAR_MISSING": "KYC Form / Application",
-        "VOTER_ID_MISSING": "KYC Form / Application",
-        "MOBILE_MISSING": "KYC Form / Application",
-        "EMAIL_MISSING": "KYC Form / Application",
-        "DOB_MISSING": "KYC Form / Application",
-        "PIN_MISSING": "KYC Form / Application",
-        # UCID
-        "UCID_KYC_INCONSISTENT": "KYC Application / Multiple ID Proofs",
-    }
+    # Results & Conclusion
+    ws[f"A{row}"] = "Results & Conclusion"
+    ws[f"A{row}"].font = subheader_font
+    row += 1
 
-    def _compliance_point(code: str) -> str:
-        if "DUP" in code or "DUPLICATE" in code:
-            return "Risk Assessment — Duplicate / Fraud Indicator"
-        if "MISSING" in code or "INCOMPLETE" in code:
-            return "Data Completeness — Mandatory Field"
-        if "KYC_INCONSISTENT" in code:
-            return "Risk Assessment — Identity Inconsistency"
-        return "Data Quality — Format / Validity"
+    try:
+        df = pl.read_csv(wide_csv_path, infer_schema_length=0)
+        total_recs = len(df)
+        exc_recs = sum(1 for val in df["overall_status"] if val != "OK")
+        exc_rate = (exc_recs / total_recs * 100) if total_recs > 0 else 0
 
-    for code, count in exception_codes.items():
-        ws[f"A{row}"] = code
-        ws[f"B{row}"] = count
-        ws[f"C{row}"] = source_docs.get(code, "SOA / KYC")
-        ws[f"D{row}"] = _compliance_point(code)
-        row += 1
+        conclusion = (
+            f"Analysis of {total_recs:,} customer records identified {exc_recs:,} records ({exc_rate:.1f}%) "
+            f"with one or more exceptions. All exceptions have been documented and ranked by severity. "
+            f"Further investigation is recommended for CRITICAL and HIGH severity findings."
+        )
+        ws[f"A{row}"] = conclusion
+        ws[f"A{row}"].alignment = Alignment(wrap_text=True)
+    except Exception:
+        ws[f"A{row}"] = "Results pending."
 
-    # Adjust column widths
-    ws.column_dimensions["A"].width = 30
-    ws.column_dimensions["B"].width = 12
-    ws.column_dimensions["C"].width = 30
-    ws.column_dimensions["D"].width = 20
+    # Column widths for Lead Sheet
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 46
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 12
+    ws.column_dimensions["F"].width = 12
+    ws.column_dimensions["G"].width = 12
 
 
 def _build_detailed_exceptions_sheet(ws, wide_csv_path, header_fill, header_font, border):
-    """Build Detailed Exceptions sheet."""
+    """Build Detailed Exceptions sheet (WIDE: all columns + per-rule status columns)."""
     try:
         df = pl.read_csv(wide_csv_path, infer_schema_length=0)
-        cols_to_keep = [
-            c
-            for c in [
-                "customer_id",
-                "overall_status",
-                "exception_count",
-                "exception_codes",
-                "exception_descriptions",
-            ]
-            if c in df.columns
-        ]
-        df = df.select(cols_to_keep)
+
+        # Mask Aadhaar: replace raw Aadhaar values with masked form XXXXXXXX + last 4 chars
+        for col_name in df.columns:
+            if "aadhaar" in col_name.lower() or "aadhar" in col_name.lower():
+                def mask_aadhaar(val):
+                    if val and isinstance(val, str) and len(val) >= 4:
+                        return "XXXXXXXX" + val[-4:]
+                    return val
+                df = df.with_columns(pl.col(col_name).map_elements(mask_aadhaar, return_dtype=pl.Utf8))
+
+        # Keep ALL columns (wide format: all original + summary columns)
+        col_names = df.columns
 
         # Headers
-        for col_idx, col_name in enumerate(cols_to_keep, 1):
+        for col_idx, col_name in enumerate(col_names, 1):
             cell = ws.cell(row=1, column=col_idx, value=col_name)
             cell.fill = header_fill
             cell.font = header_font
 
         # Data rows
-        for row_idx, row in enumerate(df.rows(), 2):
-            for col_idx, value in enumerate(row, 1):
+        for row_idx, row_vals in enumerate(df.rows(), 2):
+            for col_idx, value in enumerate(row_vals, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.border = border
 
-        # Adjust column widths
-        for col_idx in range(1, len(cols_to_keep) + 1):
-            ws.column_dimensions[get_column_letter(col_idx)].width = 20
+        # Freeze top row and enable autofilter
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+        # Adjust column widths (cap at 18)
+        for col_idx in range(1, len(col_names) + 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(18, 20)
     except Exception:
         ws["A1"] = "Unable to load exception data"
 
 
 def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
-    """Build Test of Controls / Test of Details sheet."""
+    """Build Test of Controls / Test of Details sheet with ICFR attributes."""
+    # ICFR attribute map based on criticality/exception codes
+    def get_control_objective(criticality):
+        if criticality == "CRITICAL":
+            return "No duplicate / fraudulent customers"
+        elif criticality == "HIGH":
+            return "KYC data integrity"
+        else:
+            return "Data quality controls"
+
+    def get_assertion(codes):
+        # Simple mapping: if duplicates → Existence, if missing → Completeness, else Accuracy
+        if "DUP" in codes or "DUPLICATE" in codes:
+            return "Existence"
+        elif "MISSING" in codes or "INCOMPLETE" in codes:
+            return "Completeness"
+        else:
+            return "Accuracy"
+
+    def get_attribute_tested(criticality, codes):
+        if "DUP" in codes or "DUPLICATE" in codes:
+            return "Duplicate checking"
+        elif criticality == "CRITICAL":
+            return "Identity fraud indicators"
+        else:
+            return "Data format & completeness"
+
     # Headers
     headers = [
         "Sample#",
         "Row_Index",
         "Criticality",
         "Selection_Reason",
+        "Control_Objective",
+        "Assertion",
+        "Attribute_Tested",
         "Tested_By",
         "Date",
         "Sign_Off",
@@ -309,10 +579,13 @@ def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
         ws[f"B{sample_idx}"] = sample["row_index"]
         ws[f"C{sample_idx}"] = sample["criticality"]
         ws[f"D{sample_idx}"] = sample["selection_reason"]
-        # E, F, G left blank for tester sign-off
+        ws[f"E{sample_idx}"] = get_control_objective(sample["criticality"])
+        ws[f"F{sample_idx}"] = get_assertion(sample.get("exception_codes", ""))
+        ws[f"G{sample_idx}"] = get_attribute_tested(sample["criticality"], sample.get("exception_codes", ""))
+        # H, I, J left blank for tester sign-off
 
     # Adjust column widths
-    for col_idx, width in enumerate([10, 12, 12, 30, 15, 12, 12, 20], 1):
+    for col_idx, width in enumerate([8, 10, 12, 28, 28, 14, 22, 15, 12, 12, 16], 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
 
@@ -411,5 +684,36 @@ def _build_methodology_sheet(
     ws[f"A{row}"] = fraud_focus
     ws[f"A{row}"].alignment = Alignment(wrap_text=True)
 
-    # Adjust column width
-    ws.column_dimensions["A"].width = 90
+    row += 2
+    ws[f"A{row}"] = "ICFR Control Mapping"
+    ws[f"A{row}"].font = subheader_font
+    row += 1
+
+    # ICFR Control Mapping table
+    icfr_headers = ["Category", "Control Objective", "Assertion", "Standard"]
+    for col_idx, header in enumerate(icfr_headers, 1):
+        cell = ws.cell(row=row, column=col_idx, value=header)
+        cell.fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+        cell.font = Font(bold=True, color="FFFFFF", size=11)
+    row += 1
+
+    icfr_mappings = [
+        ("KYC Format", "Customer identity is valid & verifiable", "Accuracy", "RBI KYC / ICAI"),
+        ("Address & PIN", "Address is complete & valid", "Completeness", "RBI KYC / ICAI"),
+        ("Duplicates", "No duplicate / fictitious customers", "Existence", "NFRA fraud indicators"),
+        ("Missing Data", "Mandatory KYC fields captured", "Completeness", "RBI KYC"),
+        ("Identity Grouping", "Related parties identified", "Existence", "ICAI / NFRA"),
+    ]
+
+    for cat, obj, assertion, standard in icfr_mappings:
+        ws[f"A{row}"] = cat
+        ws[f"B{row}"] = obj
+        ws[f"C{row}"] = assertion
+        ws[f"D{row}"] = standard
+        row += 1
+
+    # Adjust column widths
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 22

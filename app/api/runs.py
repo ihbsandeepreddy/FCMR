@@ -418,6 +418,11 @@ async def export_workpaper(run_id: str):
     if not wide_path.exists() or not long_path.exists():
         raise HTTPException(status_code=404, detail="CSV files not found")
 
+    # Fetch upload for workpaper metadata
+    upload = store.get_upload(run["upload_id"])
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
     try:
         df = pl.read_csv(wide_path, infer_schema_length=0)
         population = len(df)
@@ -436,7 +441,9 @@ async def export_workpaper(run_id: str):
         workpaper_path = build_workpaper(
             engagement=engagement,
             run=run,
+            upload=upload,
             wide_csv_path=wide_path,
+            long_csv_path=long_path,
             sample_records=sample_records,
             output_dir=settings.outputs_dir / run_id,
         )
