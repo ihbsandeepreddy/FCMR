@@ -474,6 +474,43 @@ def list_runs_for_engagement(engagement_id: str) -> list[dict]:
     return [dict(zip(cols, row)) for row in rows]
 
 
+def get_run_summaries_by_upload(engagement_id: str) -> dict[str, dict]:
+    """Return summaries of runs per upload: {upload_id: {"count": int, "last_status": str, "last_run_id": str, "last_finished": str}}.
+
+    Only includes uploads that have at least one run.
+    """
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT upload_id, COUNT(*) as count,
+                       MAX(started_at) as last_started,
+                       FIRST_VALUE(run_id) OVER (PARTITION BY upload_id ORDER BY started_at DESC) as last_run_id,
+                       FIRST_VALUE(status) OVER (PARTITION BY upload_id ORDER BY started_at DESC) as last_status,
+                       FIRST_VALUE(finished_at) OVER (PARTITION BY upload_id ORDER BY started_at DESC) as last_finished
+                FROM runs
+                WHERE engagement_id = ?
+                GROUP BY upload_id
+                """,
+                [engagement_id],
+            ).fetchall()
+            cols = [d[0] for d in con.description]
+
+        result = {}
+        for row in rows:
+            row_dict = dict(zip(cols, row))
+            upload_id = row_dict["upload_id"]
+            result[upload_id] = {
+                "count": row_dict["count"],
+                "last_status": row_dict["last_status"],
+                "last_run_id": row_dict["last_run_id"],
+                "last_finished": row_dict["last_finished"],
+            }
+        return result
+    except Exception:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # User CRUD
 # ---------------------------------------------------------------------------

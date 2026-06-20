@@ -1,9 +1,7 @@
-feat: Phase 2 — Analytics UI: chart fit + complete run data
+feat: Phase 3 — Dashboard remembers & shows prior analytics per upload
 
-- Made SVG charts (donut + bar) responsive: added preserveAspectRatio, width:100%, max-width styling
-- Fixed chart container layout: donut flex:0 0 280px; bar flex:1 1 320px; min-width:0 for shrinking
-- Added rules_run + sibling_runs to run_detail context (import list_rules, determine which rules ran)
-- Added "Analysis Scope" card: shows run id, upload, status, dates, categories, rules run (as badges)
-- Added "Other runs on this upload" card: table of sibling_runs when upload has >1 run
+- Added get_run_summaries_by_upload(engagement_id) store helper: returns {upload_id: {count, last_status, last_run_id, last_finished}}
+- Updated uploads.py::dashboard route to fetch run_summaries and pass to template
+- Added Analytics column to index.html dashboard uploads table: shows "{count} run(s)" + last_status badge (links to upload detail), or "—" if no runs
 
 Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>

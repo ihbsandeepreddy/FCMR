@@ -40,11 +40,12 @@ async def dashboard(request: Request):
     # Scope uploads to active engagement
     engagement_id = request.session.get("engagement_id")
     uploads = store.list_uploads(engagement_id=engagement_id) if engagement_id else []
+    run_summaries = store.get_run_summaries_by_upload(engagement_id) if engagement_id else {}
     report_types = available_report_types()
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"uploads": uploads, "report_types": report_types},
+        context={"uploads": uploads, "run_summaries": run_summaries, "report_types": report_types},
     )
 
 
