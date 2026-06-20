@@ -125,6 +125,14 @@ async def reconcile_submit(request: Request, batch_id: str):
             col_map[uc] = raw if raw and raw != "__none__" else None
         alignment[sig] = col_map
 
+    # Drop unified columns where every layout left the mapping as "— none —".
+    # These would produce all-NULL columns in the output — skip them silently.
+    unified_cols = [
+        uc for uc in unified_cols if any(alignment[sig].get(uc) for sig in alignment)
+    ]
+    for sig in alignment:
+        alignment[sig] = {uc: alignment[sig].get(uc) for uc in unified_cols}
+
     upload_id = _finalize_consolidated_upload(
         report_type=batch["report_type"],
         engagement_id=batch.get("engagement_id"),
