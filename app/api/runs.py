@@ -9,8 +9,8 @@ from pathlib import Path
 
 import polars as pl
 import psutil
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.catalog import store
@@ -347,7 +347,7 @@ async def run_detail(request: Request, run_id: str):
 
 
 @router.get("/runs/{run_id}/export/svg")
-async def export_charts_svg(run_id: str):
+async def export_charts_svg(run_id: str, dl_token: str | None = Query(None)):
     """Export donut + bar charts as a single SVG."""
     run = store.get_run(run_id)
     if not run or run["status"] != "completed" or not run["wide_csv"]:
@@ -381,7 +381,11 @@ async def export_charts_svg(run_id: str):
   </g>
 </svg>"""
 
-    return combined_svg
+    headers = {}
+    if dl_token:
+        headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
+    return Response(combined_svg, media_type="image/svg+xml", headers=headers)
 
 
 @router.get("/runs/{run_id}/charts/donut.svg")
@@ -419,7 +423,7 @@ async def get_bar_chart(run_id: str):
 
 
 @router.get("/runs/{run_id}/export/workpaper")
-async def export_workpaper(run_id: str):
+async def export_workpaper(run_id: str, dl_token: str | None = Query(None)):
     """Generate and download workpaper Excel."""
     run = store.get_run(run_id)
     if not run or run["status"] != "completed" or not run["wide_csv"] or not run["long_csv"]:
@@ -475,10 +479,15 @@ async def export_workpaper(run_id: str):
 
         store.update_run(run_id, workpaper_path=str(workpaper_path))
 
+        headers = {}
+        if dl_token:
+            headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
         return FileResponse(
             workpaper_path,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=workpaper_path.name,
+            headers=headers,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workpaper generation failed: {exc}") from exc

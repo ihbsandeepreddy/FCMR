@@ -46,18 +46,41 @@
     </div>
 
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
-      <button type="submit" name="mode" value="all" class="btn btn-run" data-loading-text="Starting…">
+      <button type="submit" name="mode" value="all" class="btn btn-run" id="run_all_btn" data-loading-text="Starting…">
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
           <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
           <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
         </svg>
         Run All Rules
       </button>
-      <button type="submit" name="mode" value="selected" class="btn btn-primary" data-loading-text="Starting…">
+      <button type="submit" name="mode" value="selected" class="btn btn-primary" id="run_selected_btn" data-loading-text="Starting…">
         Run Selected Rules
       </button>
     </div>
   </form>
+
+  <script>
+    // Auto-switch to "Run Selected" when user checks any category/rule
+    const catCheckboxes = document.querySelectorAll('input[name="categories"], input[name="rules"]');
+    const runAllBtn = document.getElementById('run_all_btn');
+    const runSelectedBtn = document.getElementById('run_selected_btn');
+
+    function updateButtonState() {
+      const anyChecked = Array.from(catCheckboxes).some(cb => cb.checked);
+      if (anyChecked) {
+        runSelectedBtn.focus(); // Highlight the "Run Selected" button
+        runAllBtn.style.opacity = '0.6';
+      } else {
+        runAllBtn.focus();
+        runAllBtn.style.opacity = '1';
+      }
+    }
+
+    catCheckboxes.forEach(cb => {
+      cb.addEventListener('change', updateButtonState);
+    });
+    updateButtonState();
+  </script>
 </div>
 {% else %}
 <div class="notice notice-warn" style="margin-bottom:16px;">
