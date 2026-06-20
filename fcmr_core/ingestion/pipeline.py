@@ -17,7 +17,7 @@ from pathlib import Path
 import duckdb
 import polars as pl
 
-from fcmr_core.config import settings
+from fcmr_core.config import apply_duckdb_limits, settings
 from fcmr_core.schemas.loader import SchemaMap, get_schema
 
 
@@ -127,6 +127,7 @@ def _stream_to_parquet(
     coercions: dict[str, int] = {}
 
     with duckdb.connect() as con:
+        apply_duckdb_limits(con)
         con.execute(f"""
             CREATE VIEW raw_csv AS
             SELECT * FROM read_csv(

@@ -6,7 +6,7 @@
 > When code and this document disagree, treat it as a bug in one of them and reconcile
 > immediately (update the code or update this doc in the same change).
 >
-> **Last reconciled with code:** 2026-06-19 (merged upstream v0.1.23; full feature audit).
+> **Last reconciled with code:** 2026-06-20 (v0.1.30 bugfix + hardening pass).
 > Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
 
 ---
@@ -62,6 +62,13 @@ the rule pipeline only produces meaningful results for `customer_master`.
 5. **Memory-aware ingestion.** CSV → Parquet conversion is delegated to DuckDB's streaming
    `read_csv` (never `pd.read_csv` of the whole file). *Caveat:* the per-row rule loops and
    the UCID/address O(n²) passes are **not** streaming — see [§18 scaling notes](#18-known-limitations--scaling-notes).
+6. **DuckDB memory limits on every analytics connection.** Every `duckdb.connect()` that
+   performs analytics **MUST** be immediately followed by `apply_duckdb_limits(con)`. This
+   prevents OOM on large files. See [§11 Configuration](#11-configuration--environment-variables)
+   and [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for details.
+7. **Runs are engagement-scoped.** When creating a run, the active engagement ID **MUST** be
+   passed to `store.create_run(upload_id, engagement_id)` so the run is visible in the
+   engagement's `/runs` list. Runs without engagement_id are hidden.
 
 ### 1.5 Deployment reality (important)
 
@@ -103,8 +110,8 @@ and the `VERCEL` env var. Three environments:
 | System monitoring | `psutil` + `/api/system/*` JSON endpoints | RAM/CPU/DuckDB state; feeds Settings page |
 | Desktop shell | Electron (Node.js) + PyInstaller (.exe/.app) | wraps FastAPI backend; auto-update via GitHub Releases |
 
-Full dependency list: `pyproject.toml` (canonical) and `requirements.txt` (Vercel runtime —
-note it currently **omits** `openpyxl` and `pyarrow`; see §18 known issues).
+Full dependency list: `pyproject.toml` (canonical) and `requirements.txt` (Vercel runtime,
+kept in sync with `pyproject.toml`).
 
 ---
 
@@ -607,9 +614,7 @@ server-rendered.
   confirms only candidates with Jaccard ≥ 0.85. No longer a scaling concern for typical files.
 - **Row-wise Python loops** in most other rules (not vectorized Polars) — correct but not fast.
 - **Vercel data is ephemeral** (`/tmp`) — not a system of record (see §1.5).
-- **`requirements.txt` is a subset** of `pyproject.toml` — currently missing `openpyxl` and
-  `pyarrow`. Workpaper/EAD Excel export and some Parquet paths can fail on Vercel until these
-  are added. (Fix: align `requirements.txt` with `pyproject.toml` deps.)
+- **`requirements.txt` is kept in sync** with `pyproject.toml` (v0.1.30+).
 - **No change-password / user management** despite the first-login notice; single hard-coded
   `admin`.
 - **Analytics is customer_master-only**; other report types ingest but have no rules.
@@ -640,6 +645,10 @@ server-rendered.
 | **Warm beige + terracotta, DM Sans/Lora/IBM Plex Mono, sidebar+topbar shell** | House style; reference UI for sibling tools | Keep consistent across tools |
 | **htmx + server-rendered Jinja2, no SPA** | Keep logic in Python, low complexity | — |
 | **Brand "SanGir Automations"; "FCMR" internal** | Product identity | — |
+| **Runs are engagement-scoped** (v0.1.30) | Only runs with a stored `engagement_id` appear in the `/runs` list; prevents orphaned runs | Always pass `engagement_id` to `create_run()` from the session |
+| **Selected categories are persisted** (v0.1.30) | Run-detail labels which categories were chosen; supports selective re-runs | Always call `update_run(selected_rules=...)` when mode != "all" |
+| **DuckDB memory limits on every analytics connection** (v0.1.30) | Prevents OOM on large files; enables graceful disk spill on constrained systems | Apply limits immediately after `duckdb.connect()` in all analytics paths |
+| **Catalog connection closed on shutdown** (v0.1.30) | Graceful release of DuckDB single-writer lock; allows Electron to reap orphaned processes | Call `store.close_catalog()` in lifespan shutdown + signal handlers on desktop |
 
 ---
 

@@ -64,6 +64,17 @@ async function spawnBackend() {
     ? "python"
     : path.join(process.resourcesPath, "sangir-backend", "sangir-backend.exe");
 
+  // On Windows, kill any orphaned backend exe to clear a stale catalog.duckdb lock
+  if (process.platform === "win32" && !isDev) {
+    try {
+      const { execSync } = require("child_process");
+      execSync("taskkill /F /IM sangir-backend.exe", { stdio: "ignore" });
+      writeLog("Reaped orphaned backend processes");
+    } catch {
+      // No orphans running, or taskkill not found — either way, proceed
+    }
+  }
+
   const repoRoot = path.join(__dirname, "..");
   const args = isDev ? [path.join(repoRoot, "desktop_backend.py")] : [];
   const env = {

@@ -52,7 +52,6 @@ _SEVERITY_MAP = {
     "DOB_MISSING": "MEDIUM",
     "PIN_MISSING": "MEDIUM",
     # LOW: PIN/address mismatches (lower audit impact)
-    "PINCODE_MISMATCH": "LOW",
     "DISTRICT_PIN_MISMATCH": "LOW",
     "STATE_PIN_MISMATCH": "LOW",
     "ADDRESS_INCOMPLETE": "LOW",
