@@ -74,12 +74,19 @@ def group_files_by_signature(files: list[FileEntry]) -> dict[str, dict]:
 
 
 def unified_columns(groups: dict[str, dict]) -> list[str]:
-    """Union of all headers across groups, preserving first-seen order."""
+    """Union of all headers across groups, preserving first-seen order.
+
+    De-duplicates case-insensitively: DuckDB treats column names as
+    case-insensitive, so ``Covered_portion`` and ``covered_portion`` in the
+    same SELECT would raise a BinderException.
+    """
     seen: list[str] = []
+    seen_lower: set[str] = set()
     for g in groups.values():
         for h in g["headers"]:
-            if h not in seen:
+            if h.lower() not in seen_lower:
                 seen.append(h)
+                seen_lower.add(h.lower())
     return seen
 
 
@@ -163,7 +170,7 @@ def build_combined_csv(
             selects.append(
                 f"SELECT {', '.join(parts)}, '{safe_name}' AS \"{SOURCE_COL}\" "
                 f"FROM read_csv('{src_path}', auto_detect=true, ignore_errors=true, "
-                f"all_varchar=true)"
+                f"all_varchar=true, strict_mode=false)"
             )
 
     union_sql = "\nUNION ALL BY NAME\n".join(selects)
