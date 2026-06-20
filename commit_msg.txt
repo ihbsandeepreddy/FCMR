@@ -1,7 +1,10 @@
-feat: Phase 3 — Dashboard remembers & shows prior analytics per upload
+feat: Phase 4b/4c — Logo presentation: float & resize (sans background-cut)
 
-- Added get_run_summaries_by_upload(engagement_id) store helper: returns {upload_id: {count, last_status, last_run_id, last_finished}}
-- Updated uploads.py::dashboard route to fetch run_summaries and pass to template
-- Added Analytics column to index.html dashboard uploads table: shows "{count} run(s)" + last_status badge (links to upload detail), or "—" if no runs
+- Removed .sidebar-branding text block (SanGir Automations title + version) from base.html
+- Updated .sidebar-logo: height 120px, padding 18px 16px, removed border-bottom
+- Updated .sidebar-logo-img: max-width 188px, max-height 96px (larger badge)
+- Removed unused .sidebar-logo-mark dead code
+
+NOTE: 4a (transparent logo image via Pillow chroma-key) is pending — requires capable model to cut background and visually verify. Once 4a lands, the logo will float transparently on the beige sidebar.
 
 Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>

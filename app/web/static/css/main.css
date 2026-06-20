@@ -64,30 +64,18 @@ body {
 }
 
 .sidebar-logo {
-  height: 64px;
+  height: 120px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 15px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 16px;
   gap: 9px;
   flex-shrink: 0;
 }
 
-.sidebar-logo-mark {
-  width: 26px; height: 26px;
-  background: var(--accent);
-  border-radius: 5px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 5px;
-  flex-shrink: 0;
-}
-
 .sidebar-logo-img {
-  max-width: 140px;
-  max-height: 48px;
+  max-width: 188px;
+  max-height: 96px;
   object-fit: contain;
 }
 
