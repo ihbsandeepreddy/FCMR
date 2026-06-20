@@ -1,13 +1,9 @@
-feat: Phase 1 — Excel workpaper: full Big-4 / ICFR restructure
+feat: Phase 2 — Analytics UI: chart fit + complete run data
 
-- Added 5-sheet workpaper (Cover, Lead Sheet, Detailed Exceptions, TOC/TOD, Methodology)
-- Cover sheet: W/P reference, sign-off blocks, index, tickmark legend
-- Lead Sheet: Purpose & Objective, Population Reconciliation, Procedures Performed table (shows all rules run with descriptions + exception counts), Results & Conclusion
-- Detailed Exceptions: WIDE format (all uploaded columns), Aadhaar masked, freeze panes + autofilter
-- TOC/TOD: added ICFR attribute columns (Control Objective, Assertion, Attribute Tested)
-- Methodology: appended ICFR Control Mapping table
-- New helper _procedures_performed() returns rules run with category, severity, exception counts
-- Updated build_workpaper() signature to accept upload dict and long_csv_path
-- Updated export_workpaper() to fetch upload and pass to build_workpaper()
+- Made SVG charts (donut + bar) responsive: added preserveAspectRatio, width:100%, max-width styling
+- Fixed chart container layout: donut flex:0 0 280px; bar flex:1 1 320px; min-width:0 for shrinking
+- Added rules_run + sibling_runs to run_detail context (import list_rules, determine which rules ran)
+- Added "Analysis Scope" card: shows run id, upload, status, dates, categories, rules run (as badges)
+- Added "Other runs on this upload" card: table of sibling_runs when upload has >1 run
 
 Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>

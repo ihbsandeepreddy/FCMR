@@ -178,17 +178,75 @@
   </div>
 </div>
 
+{# Analysis Scope #}
+<div class="card">
+  <div class="card-title">Analysis Scope</div>
+  <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:12px; font-size:13.5px;">
+    <div><strong>Run ID:</strong> <span class="mono">{{ run.run_id[:8] }}…</span></div>
+    <div><strong>Upload:</strong> {{ run.upload_id[:8] if run.upload_id else "—" }}</div>
+    <div><strong>Status:</strong> <span class="badge badge-{{ run.status }}">{{ run.status }}</span></div>
+    <div><strong>Started:</strong> {{ run.started_at[:16].replace('T', ' ') if run.started_at else "—" }}</div>
+    {% if run.finished_at %}
+    <div><strong>Finished:</strong> {{ run.finished_at[:16].replace('T', ' ') }}</div>
+    {% endif %}
+    {% if ran_categories %}
+    <div><strong>Categories:</strong> {{ ran_categories }}</div>
+    {% endif %}
+  </div>
+  {% if rules_run %}
+  <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+    <div style="font-size:12px; font-weight:600; color:var(--muted); margin-bottom:8px;">Rules Run:</div>
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      {% for rule in rules_run %}
+      <span class="badge" style="background:var(--row-alt); font-size:11px;">{{ rule.rule_id }}</span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# Other runs on this upload #}
+{% if sibling_runs | length > 1 %}
+<div class="card" style="padding:0; overflow:hidden;">
+  <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border);">
+    <div class="card-title" style="margin-bottom:0;">Other Runs on This Upload</div>
+  </div>
+  <table class="data-table" style="margin-bottom:0;">
+    <thead>
+      <tr>
+        <th>Run ID</th>
+        <th>Status</th>
+        <th>Started</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for sr in sibling_runs %}
+      <tr>
+        <td class="mono" style="font-size:11px;">{{ sr.run_id[:8] }}…</td>
+        <td><span class="badge badge-{{ sr.status }}">{{ sr.status }}</span></td>
+        <td class="timestamp" style="font-size:11px;">{{ sr.started_at[:16].replace('T', ' ') if sr.started_at else "—" }}</td>
+        <td style="text-align:right; white-space:nowrap;">
+          <a href="/runs/{{ sr.run_id }}" class="btn btn-sm btn-ghost">Results</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {# Charts #}
 {% if donut_svg and bar_svg %}
 <div class="card" style="padding:20px; margin-bottom:16px;">
   <div class="card-title" style="margin-bottom:16px;">Exception Summary Charts</div>
   <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start; margin-bottom:16px;">
     <!-- Donut chart -->
-    <div style="flex-shrink:0;">
+    <div style="flex:0 0 280px; max-width:100%;">
       {{ donut_svg | safe }}
     </div>
     <!-- Bar chart -->
-    <div style="flex-grow:1; min-width:350px; overflow-x:auto;">
+    <div style="flex:1 1 320px; min-width:0;">
       {{ bar_svg | safe }}
     </div>
   </div>

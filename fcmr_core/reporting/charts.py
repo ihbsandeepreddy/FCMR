@@ -51,14 +51,14 @@ def build_donut_svg(
     """
     total = sum(status_counts.values())
     if total == 0:
-        return f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg"></svg>'
+        return f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;max-width:{width}px;display:block;" xmlns="http://www.w3.org/2000/svg"></svg>'
 
     center_x, center_y = width / 2, height / 2
     outer_radius = min(width, height) / 2 - 20
     inner_radius = outer_radius * 0.6
 
     svg_lines = [
-        f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">',
+        f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;max-width:{width}px;display:block;" xmlns="http://www.w3.org/2000/svg">',
         "<style>",
         ".donut-label { font-size: 12px; fill: #374151; text-anchor: middle; }",
         ".donut-center-text { font-size: 20px; font-weight: bold; fill: #1f2937; text-anchor: middle; }",
@@ -151,7 +151,7 @@ def build_bar_chart(
         SVG string (inline-safe)
     """
     if not exception_counts:
-        return f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg"><text x="10" y="20" font-size="14" fill="#999">No exception data</text></svg>'
+        return f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;max-width:{width}px;display:block;" xmlns="http://www.w3.org/2000/svg"><text x="10" y="20" font-size="14" fill="#999">No exception data</text></svg>'
 
     # Sort by count descending, take top N
     sorted_items = sorted(exception_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
@@ -166,7 +166,7 @@ def build_bar_chart(
     bar_height = (height - margin_top - margin_bottom) / len(sorted_items)
 
     svg_lines = [
-        f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">',
+        f'<svg viewBox="0 0 {width} {height}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;max-width:{width}px;display:block;" xmlns="http://www.w3.org/2000/svg">',
         "<style>",
         ".bar-label { font-size: 11px; fill: #374151; text-anchor: end; }",
         ".bar-value { font-size: 11px; fill: #1f2937; font-weight: bold; }",

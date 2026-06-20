@@ -252,7 +252,7 @@ def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = Non
 async def run_detail(request: Request, run_id: str):
     import json
 
-    from fcmr_core.rules.registry import CATEGORIES
+    from fcmr_core.rules.registry import CATEGORIES, list_rules
 
     run = store.get_run(run_id)
     if not run:
@@ -263,6 +263,27 @@ async def run_detail(request: Request, run_id: str):
     summary = None
     ran_categories = None
     missing_summary = None
+    rules_run = []
+    sibling_runs = []
+
+    # Determine which rules were run and build rules_run list
+    try:
+        selected_rules_json = run.get("selected_rules")
+        if selected_rules_json:
+            selected_rule_ids = json.loads(selected_rules_json)
+            rules_run = [{"rule_id": r.rule_id, "description": r.description}
+                        for r in list_rules() if r.rule_id in selected_rule_ids]
+        else:
+            rules_run = [{"rule_id": r.rule_id, "description": r.description}
+                        for r in list_rules()]
+    except Exception:
+        rules_run = []
+
+    # Get sibling runs (other runs on the same upload)
+    try:
+        sibling_runs = store.list_runs(run["upload_id"])
+    except Exception:
+        sibling_runs = []
 
     # Map selected_rules to category labels
     if run.get("selected_rules"):
@@ -317,6 +338,8 @@ async def run_detail(request: Request, run_id: str):
             "bar_svg": bar_svg,
             "ran_categories": ran_categories,
             "missing_summary": missing_summary,
+            "rules_run": rules_run,
+            "sibling_runs": sibling_runs,
         },
     )
 
