@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -222,13 +224,42 @@ def _load_upload(request: Request, upload_id: str) -> tuple[dict, pl.DataFrame]:
     return upload, store.get_upload_df(upload_id)
 
 
+def _get_upload_meta(upload_id: str) -> dict:
+    upload = store.get_upload(upload_id)
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    if upload["status"] != "ready":
+        raise HTTPException(status_code=409, detail="Upload is not ready for download.")
+    return upload
+
+
 @router.get("/dashboard/uploads/{upload_id}/download/csv")
 async def upload_download_csv(request: Request, upload_id: str):
-    upload, df = _load_upload(request, upload_id)
+    upload = _get_upload_meta(upload_id)
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     filename = f"{_label(upload['report_type']).replace(' ', '_')}_{ts}.csv"
+
+    # Write to a temp file via DuckDB COPY TO — zero Python-RAM load.
+    fd, tmp_path = tempfile.mkstemp(suffix=".csv")
+    os.close(fd)
+    store.copy_upload_to_csv(upload_id, tmp_path)
+
+    def _iter_file():
+        try:
+            with open(tmp_path, "rb") as f:
+                while True:
+                    chunk = f.read(1024 * 1024)  # 1 MB chunks
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
     return StreamingResponse(
-        io.BytesIO(df.write_csv().encode("utf-8")),
+        _iter_file(),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

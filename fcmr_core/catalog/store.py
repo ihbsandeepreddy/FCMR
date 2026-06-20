@@ -317,6 +317,20 @@ def get_upload_df(upload_id: str):
         return con.execute(f"SELECT * FROM {table}").pl()
 
 
+def copy_upload_to_csv(upload_id: str, out_path: str) -> None:
+    """Write the upload's data directly to *out_path* via DuckDB COPY TO.
+
+    Uses no Python-side RAM — DuckDB streams rows straight to disk.
+    *out_path* must be an absolute path on the server filesystem.
+    """
+    table = f"data_{upload_id.replace('-', '_')}"
+    from pathlib import Path as _Path
+
+    posix = _Path(out_path).as_posix()
+    with _conn() as con:
+        con.execute(f"COPY (SELECT * FROM {table}) TO '{posix}' (HEADER, FORMAT CSV)")
+
+
 def drop_upload_data(upload_id: str) -> None:
     """Remove the upload's data table from DuckDB (cleanup)."""
     table = f"data_{upload_id.replace('-', '_')}"
