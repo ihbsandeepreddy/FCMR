@@ -271,11 +271,13 @@ async def run_detail(request: Request, run_id: str):
         selected_rules_json = run.get("selected_rules")
         if selected_rules_json:
             selected_rule_ids = json.loads(selected_rules_json)
-            rules_run = [{"rule_id": r.rule_id, "description": r.description}
-                        for r in list_rules() if r.rule_id in selected_rule_ids]
+            rules_run = [
+                {"rule_id": r.rule_id, "description": r.description}
+                for r in list_rules()
+                if r.rule_id in selected_rule_ids
+            ]
         else:
-            rules_run = [{"rule_id": r.rule_id, "description": r.description}
-                        for r in list_rules()]
+            rules_run = [{"rule_id": r.rule_id, "description": r.description} for r in list_rules()]
     except Exception:
         rules_run = []
 

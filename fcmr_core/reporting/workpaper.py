@@ -1,6 +1,6 @@
 """Excel workpaper builder for audit documentation.
 
-Generates a 4-sheet workpaper: Lead Sheet, Detailed Exceptions, TOC and TOD, Methodology.
+Generates a 5-sheet workpaper: Cover, Lead Sheet, Detailed Exceptions, TOC and TOD, Methodology.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from fcmr_core.reporting.aggregation import aggregate_exception_codes
 from fcmr_core.rules.registry import CATEGORIES, list_rules
 from fcmr_core.sampling.stratification import _SEVERITY_MAP
 
@@ -50,12 +49,11 @@ def _procedures_performed(run: dict, long_csv_path: Path) -> list[dict]:
 
         # Read long CSV and count exceptions per rule
         try:
-            long_df = pl.read_csv(long_csv_path, columns=["rule_id", "status"], infer_schema_length=0)
+            long_df = pl.read_csv(
+                long_csv_path, columns=["rule_id", "status"], infer_schema_length=0
+            )
             exception_counts = (
-                long_df.filter(pl.col("status") != "OK")
-                .group_by("rule_id")
-                .len()
-                .to_dicts()
+                long_df.filter(pl.col("status") != "OK").group_by("rule_id").len().to_dicts()
             )
             exc_map = {d["rule_id"]: d["len"] for d in exception_counts}
         except Exception:
@@ -84,13 +82,15 @@ def _procedures_performed(run: dict, long_csv_path: Path) -> list[dict]:
             except Exception:
                 severity = "—"
 
-            procedures.append({
-                "rule_id": rule_id,
-                "description": rule_meta.description,
-                "category": category,
-                "severity": severity,
-                "exceptions": exceptions,
-            })
+            procedures.append(
+                {
+                    "rule_id": rule_id,
+                    "description": rule_meta.description,
+                    "category": category,
+                    "severity": severity,
+                    "exceptions": exceptions,
+                }
+            )
 
         return procedures
     except Exception:
@@ -375,7 +375,13 @@ def _build_lead_sheet(
     ws[f"A{row}"].font = subheader_font
     row += 1
 
-    reconciliation_headers = ["Source File", "Rows Ingested", "Records Analyzed", "Difference", "Ingested At"]
+    reconciliation_headers = [
+        "Source File",
+        "Rows Ingested",
+        "Records Analyzed",
+        "Difference",
+        "Ingested At",
+    ]
     for col_idx, header in enumerate(reconciliation_headers, 1):
         cell = ws.cell(row=row, column=col_idx, value=header)
         cell.fill = header_fill
@@ -392,7 +398,7 @@ def _build_lead_sheet(
         ws[f"B{row}"] = ingested
         ws[f"C{row}"] = analyzed
         ws[f"D{row}"] = difference
-        ws[f"E{row}"] = (upload.get("ingested_at", "—")[:10] if upload.get("ingested_at") else "—")
+        ws[f"E{row}"] = upload.get("ingested_at", "—")[:10] if upload.get("ingested_at") else "—"
         row += 2
     except Exception:
         row += 2
@@ -430,7 +436,15 @@ def _build_lead_sheet(
     ws[f"A{row}"].font = subheader_font
     row += 1
 
-    proc_headers = ["#", "Rule ID", "Audit Procedure (Description)", "Category", "Severity", "Exceptions", "Exception %"]
+    proc_headers = [
+        "#",
+        "Rule ID",
+        "Audit Procedure (Description)",
+        "Category",
+        "Severity",
+        "Exceptions",
+        "Exception %",
+    ]
     for col_idx, header in enumerate(proc_headers, 1):
         cell = ws.cell(row=row, column=col_idx, value=header)
         cell.fill = header_fill
@@ -494,11 +508,15 @@ def _build_detailed_exceptions_sheet(ws, wide_csv_path, header_fill, header_font
         # Mask Aadhaar: replace raw Aadhaar values with masked form XXXXXXXX + last 4 chars
         for col_name in df.columns:
             if "aadhaar" in col_name.lower() or "aadhar" in col_name.lower():
+
                 def mask_aadhaar(val):
                     if val and isinstance(val, str) and len(val) >= 4:
                         return "XXXXXXXX" + val[-4:]
                     return val
-                df = df.with_columns(pl.col(col_name).map_elements(mask_aadhaar, return_dtype=pl.Utf8))
+
+                df = df.with_columns(
+                    pl.col(col_name).map_elements(mask_aadhaar, return_dtype=pl.Utf8)
+                )
 
         # Keep ALL columns (wide format: all original + summary columns)
         col_names = df.columns
@@ -528,6 +546,7 @@ def _build_detailed_exceptions_sheet(ws, wide_csv_path, header_fill, header_font
 
 def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
     """Build Test of Controls / Test of Details sheet with ICFR attributes."""
+
     # ICFR attribute map based on criticality/exception codes
     def get_control_objective(criticality):
         if criticality == "CRITICAL":
@@ -581,7 +600,9 @@ def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
         ws[f"D{sample_idx}"] = sample["selection_reason"]
         ws[f"E{sample_idx}"] = get_control_objective(sample["criticality"])
         ws[f"F{sample_idx}"] = get_assertion(sample.get("exception_codes", ""))
-        ws[f"G{sample_idx}"] = get_attribute_tested(sample["criticality"], sample.get("exception_codes", ""))
+        ws[f"G{sample_idx}"] = get_attribute_tested(
+            sample["criticality"], sample.get("exception_codes", "")
+        )
         # H, I, J left blank for tester sign-off
 
     # Adjust column widths
