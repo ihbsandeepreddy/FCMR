@@ -8,8 +8,6 @@ was not mapped or was not present in the source files.
 
 from __future__ import annotations
 
-import io
-from datetime import datetime, timezone
 from pathlib import Path
 
 import polars as pl
@@ -107,7 +105,20 @@ PIVOT_MEASURE_RAW: list[str] = [
 ]
 
 # DPD bucket strings that imply > 90 days overdue
-_HIGH_DPD_PATTERNS = ("91", "121", "151", "181", "211", "241", "271", "361", "npa", "sub", "doubtful", "loss")
+_HIGH_DPD_PATTERNS = (
+    "91",
+    "121",
+    "151",
+    "181",
+    "211",
+    "241",
+    "271",
+    "361",
+    "npa",
+    "sub",
+    "doubtful",
+    "loss",
+)
 
 # Loan status values indicating account closure / write-off
 _CLOSED_STATUSES = {"closed", "written off", "writeoff", "wo", "write off", "settled", "foreclosed"}
@@ -116,6 +127,7 @@ _CLOSED_STATUSES = {"closed", "written off", "writeoff", "wo", "write off", "set
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _safe_float(df: pl.DataFrame, col: str) -> pl.Series:
     """Cast a column to Float64, returning nulls for non-numeric values."""
@@ -146,6 +158,7 @@ def _available_dims(df: pl.DataFrame) -> list[str]:
 # ---------------------------------------------------------------------------
 # 1. Master pivot report
 # ---------------------------------------------------------------------------
+
 
 def generate_pivot_report(df: pl.DataFrame) -> pl.DataFrame:
     """GROUP BY all available dimension columns, SUM/COUNT all measure columns."""
@@ -192,6 +205,7 @@ def generate_pivot_report(df: pl.DataFrame) -> pl.DataFrame:
 # 2. Stage-wise ECL summary
 # ---------------------------------------------------------------------------
 
+
 def generate_stage_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "stage" not in df.columns:
         return pl.DataFrame({"note": ["stage column not available"]})
@@ -200,11 +214,23 @@ def generate_stage_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
     if "existing_provision" in df.columns:
-        agg.append(pl.col("existing_provision").cast(pl.Float64, strict=False).sum().alias("Provision as per Policy"))
+        agg.append(
+            pl.col("existing_provision")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Provision as per Policy")
+        )
     if "additional_provision" in df.columns:
-        agg.append(pl.col("additional_provision").cast(pl.Float64, strict=False).sum().alias("Additional Provision"))
+        agg.append(
+            pl.col("additional_provision")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Additional Provision")
+        )
     if "loan_id" in df.columns:
         agg.append(pl.col("loan_id").count().alias("Loan Count"))
 
@@ -216,9 +242,7 @@ def generate_stage_summary(df: pl.DataFrame) -> pl.DataFrame:
     # Derived: coverage %
     if "Total EAD" in result.columns and "Total Provision" in result.columns:
         result = result.with_columns(
-            (pl.col("Total Provision") / pl.col("Total EAD") * 100)
-            .round(2)
-            .alias("Coverage %")
+            (pl.col("Total Provision") / pl.col("Total EAD") * 100).round(2).alias("Coverage %")
         )
 
     return result
@@ -227,6 +251,7 @@ def generate_stage_summary(df: pl.DataFrame) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 # 3. DPD bucket summary
 # ---------------------------------------------------------------------------
+
 
 def generate_dpd_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "dpd_bucket" not in df.columns:
@@ -238,19 +263,29 @@ def generate_dpd_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "outstanding_principal" in df.columns:
-        agg.append(pl.col("outstanding_principal").cast(pl.Float64, strict=False).sum().alias("Outstanding Principal"))
+        agg.append(
+            pl.col("outstanding_principal")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Outstanding Principal")
+        )
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
 
     if not agg:
         return pl.DataFrame({"DPD Bucket": df["dpd_bucket"].unique()})
 
-    return df.group_by("dpd_bucket").agg(agg).rename({"dpd_bucket": "DPD Bucket"}).sort("DPD Bucket")
+    return (
+        df.group_by("dpd_bucket").agg(agg).rename({"dpd_bucket": "DPD Bucket"}).sort("DPD Bucket")
+    )
 
 
 # ---------------------------------------------------------------------------
 # 4. Stage × DPD cross-tab
 # ---------------------------------------------------------------------------
+
 
 def generate_stage_dpd_crosstab(df: pl.DataFrame) -> pl.DataFrame:
     if "stage" not in df.columns or "dpd_bucket" not in df.columns:
@@ -271,15 +306,14 @@ def generate_stage_dpd_crosstab(df: pl.DataFrame) -> pl.DataFrame:
     # Flag: DPD > 90 but Stage = 1
     high_dpd = _is_high_dpd(result["DPD Bucket"])
     stage_1 = result["Stage"].cast(pl.Utf8, strict=False).str.strip_chars() == "1"
-    result = result.with_columns(
-        (high_dpd & stage_1).alias("DPD-Stage Mismatch Flag")
-    )
+    result = result.with_columns((high_dpd & stage_1).alias("DPD-Stage Mismatch Flag"))
     return result
 
 
 # ---------------------------------------------------------------------------
 # 5. Product-wise breakup
 # ---------------------------------------------------------------------------
+
 
 def generate_product_summary(df: pl.DataFrame) -> pl.DataFrame:
     group_cols = [c for c in ["scheme_id", "scheme_name"] if c in df.columns]
@@ -290,7 +324,9 @@ def generate_product_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
     if "loan_id" in df.columns:
         agg.append(pl.col("loan_id").count().alias("Loan Count"))
     if not agg:
@@ -298,7 +334,8 @@ def generate_product_summary(df: pl.DataFrame) -> pl.DataFrame:
 
     rename = {"scheme_id": "Product ID", "scheme_name": "Product Name"}
     return (
-        df.group_by(group_cols).agg(agg)
+        df.group_by(group_cols)
+        .agg(agg)
         .rename({k: v for k, v in rename.items() if k in group_cols})
         .sort(group_cols[0])
     )
@@ -308,6 +345,7 @@ def generate_product_summary(df: pl.DataFrame) -> pl.DataFrame:
 # 6. Geographic (state) concentration
 # ---------------------------------------------------------------------------
 
+
 def generate_geographic_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "state" not in df.columns:
         return pl.DataFrame({"note": ["state column not available"]})
@@ -316,7 +354,9 @@ def generate_geographic_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
     if "loan_id" in df.columns:
         agg.append(pl.col("loan_id").count().alias("Loan Count"))
     if not agg:
@@ -329,15 +369,26 @@ def generate_geographic_summary(df: pl.DataFrame) -> pl.DataFrame:
 # 7. Secured vs unsecured
 # ---------------------------------------------------------------------------
 
+
 def generate_security_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "stage" not in df.columns:
         return pl.DataFrame({"note": ["stage column not available"]})
 
     agg: list[pl.Expr] = []
     if "covered_portion" in df.columns:
-        agg.append(pl.col("covered_portion").cast(pl.Float64, strict=False).sum().alias("Covered (Secured)"))
+        agg.append(
+            pl.col("covered_portion")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Covered (Secured)")
+        )
     if "uncovered_portion" in df.columns:
-        agg.append(pl.col("uncovered_portion").cast(pl.Float64, strict=False).sum().alias("Uncovered (Unsecured)"))
+        agg.append(
+            pl.col("uncovered_portion")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Uncovered (Unsecured)")
+        )
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if not agg:
@@ -358,6 +409,7 @@ def generate_security_summary(df: pl.DataFrame) -> pl.DataFrame:
 # 8. Write-off summary
 # ---------------------------------------------------------------------------
 
+
 def generate_writeoff_summary(df: pl.DataFrame) -> pl.DataFrame:
     group_cols = [c for c in ["written_off", "stage"] if c in df.columns]
     if not group_cols:
@@ -367,7 +419,9 @@ def generate_writeoff_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
     if "loan_id" in df.columns:
         agg.append(pl.col("loan_id").count().alias("Loan Count"))
     if not agg:
@@ -380,6 +434,7 @@ def generate_writeoff_summary(df: pl.DataFrame) -> pl.DataFrame:
 # 9. SBU / SubSBU breakdown
 # ---------------------------------------------------------------------------
 
+
 def generate_sbu_summary(df: pl.DataFrame) -> pl.DataFrame:
     group_cols = [c for c in ["sbu", "sub_sbu"] if c in df.columns]
     if not group_cols:
@@ -389,7 +444,9 @@ def generate_sbu_summary(df: pl.DataFrame) -> pl.DataFrame:
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
     if "loan_id" in df.columns:
         agg.append(pl.col("loan_id").count().alias("Loan Count"))
     if not agg:
@@ -397,7 +454,8 @@ def generate_sbu_summary(df: pl.DataFrame) -> pl.DataFrame:
 
     rename = {"sbu": "SBU", "sub_sbu": "Sub-SBU"}
     return (
-        df.group_by(group_cols).agg(agg)
+        df.group_by(group_cols)
+        .agg(agg)
         .rename({k: v for k, v in rename.items() if k in group_cols})
         .sort(group_cols[0])
     )
@@ -406,6 +464,7 @@ def generate_sbu_summary(df: pl.DataFrame) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 # 10. Provision reasonableness check
 # ---------------------------------------------------------------------------
+
 
 def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
     if "additional_provision" not in df.columns:
@@ -422,12 +481,17 @@ def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
 
     if "existing_provision" in filtered.columns:
         result = result.with_columns(
-            filtered["existing_provision"].cast(pl.Float64, strict=False).alias("existing_provision")
+            filtered["existing_provision"]
+            .cast(pl.Float64, strict=False)
+            .alias("existing_provision")
         )
         # ratio = additional / existing (avoid div by zero)
         result = result.with_columns(
             pl.when(pl.col("existing_provision") > 0)
-            .then(pl.col("additional_provision").cast(pl.Float64, strict=False) / pl.col("existing_provision"))
+            .then(
+                pl.col("additional_provision").cast(pl.Float64, strict=False)
+                / pl.col("existing_provision")
+            )
             .otherwise(None)
             .round(4)
             .alias("Ratio (Addl/Policy)")
@@ -440,8 +504,14 @@ def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
                 (pl.col("Ratio (Addl/Policy)") > 2 * median_ratio).alias("Outlier Flag")
             )
 
-    rename = {"loan_id": "Loan ID", "stage": "Stage", "dpd_bucket": "DPD Bucket", "ead": "EAD",
-               "additional_provision": "Additional Provision", "existing_provision": "Policy Provision"}
+    rename = {
+        "loan_id": "Loan ID",
+        "stage": "Stage",
+        "dpd_bucket": "DPD Bucket",
+        "ead": "EAD",
+        "additional_provision": "Additional Provision",
+        "existing_provision": "Policy Provision",
+    }
     return result.rename({k: v for k, v in rename.items() if k in result.columns})
 
 
@@ -449,17 +519,38 @@ def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
 # 11. Negative values check
 # ---------------------------------------------------------------------------
 
+
 def generate_negative_check(df: pl.DataFrame) -> pl.DataFrame:
     numeric_canonical = [
-        "ead", "outstanding_principal", "outstanding_interest", "accrued_interest",
-        "overdue_charges", "future_pos", "gross_book_value", "collateral_value",
-        "covered_portion", "uncovered_portion", "existing_provision",
-        "additional_provision", "total_provision", "sanction_amount",
-        "disbursed_amount", "principal_paid", "interest_paid", "emi_amount", "mob",
+        "ead",
+        "outstanding_principal",
+        "outstanding_interest",
+        "accrued_interest",
+        "overdue_charges",
+        "future_pos",
+        "gross_book_value",
+        "collateral_value",
+        "covered_portion",
+        "uncovered_portion",
+        "existing_provision",
+        "additional_provision",
+        "total_provision",
+        "sanction_amount",
+        "disbursed_amount",
+        "principal_paid",
+        "interest_paid",
+        "emi_amount",
+        "mob",
     ]
     numeric_raw = [
-        "Prepaid", "TotalDebtors", "Debtors_Redemption_Premium", "AccruedRedemptionPremium",
-        "zero_90_days_interest", "zero_90_int_Final", "PROCESSINGFEES", "Unbanked",
+        "Prepaid",
+        "TotalDebtors",
+        "Debtors_Redemption_Premium",
+        "AccruedRedemptionPremium",
+        "zero_90_days_interest",
+        "zero_90_int_Final",
+        "PROCESSINGFEES",
+        "Unbanked",
     ]
     all_numeric = [c for c in (numeric_canonical + numeric_raw) if c in df.columns]
 
@@ -469,13 +560,15 @@ def generate_negative_check(df: pl.DataFrame) -> pl.DataFrame:
         series = df[col].cast(pl.Float64, strict=False)
         neg_count = (series < 0).sum()
         null_count = series.is_null().sum()
-        rows.append({
-            "Column": col,
-            "Total Rows": total,
-            "Negative Count": neg_count,
-            "Null Count": null_count,
-            "Has Issue": neg_count > 0,
-        })
+        rows.append(
+            {
+                "Column": col,
+                "Total Rows": total,
+                "Negative Count": neg_count,
+                "Null Count": null_count,
+                "Has Issue": neg_count > 0,
+            }
+        )
 
     return pl.DataFrame(rows) if rows else pl.DataFrame({"note": ["No numeric columns found"]})
 
@@ -483,6 +576,7 @@ def generate_negative_check(df: pl.DataFrame) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 # 12. Stage-DPD mismatch
 # ---------------------------------------------------------------------------
+
 
 def generate_stage_mismatch(df: pl.DataFrame) -> pl.DataFrame:
     if "stage" not in df.columns:
@@ -517,10 +611,21 @@ def generate_stage_mismatch(df: pl.DataFrame) -> pl.DataFrame:
     if result.is_empty():
         return pl.DataFrame({"note": ["No stage-DPD mismatches found — data is consistent"]})
 
-    keep_cols = [c for c in ["loan_id", "stage", "dpd_bucket", "loan_status", "ead"] if c in result.columns]
+    keep_cols = [
+        c for c in ["loan_id", "stage", "dpd_bucket", "loan_status", "ead"] if c in result.columns
+    ]
     return result.select(keep_cols).rename(
-        {k: v for k, v in {"loan_id": "Loan ID", "stage": "Stage", "dpd_bucket": "DPD Bucket",
-                            "loan_status": "Loan Status", "ead": "EAD"}.items() if k in keep_cols}
+        {
+            k: v
+            for k, v in {
+                "loan_id": "Loan ID",
+                "stage": "Stage",
+                "dpd_bucket": "DPD Bucket",
+                "loan_status": "Loan Status",
+                "ead": "EAD",
+            }.items()
+            if k in keep_cols
+        }
     )
 
 
@@ -528,15 +633,20 @@ def generate_stage_mismatch(df: pl.DataFrame) -> pl.DataFrame:
 # 13. FVTPL split
 # ---------------------------------------------------------------------------
 
+
 def generate_fvtpl_split(df: pl.DataFrame) -> pl.DataFrame:
     if "FVTPL" not in df.columns:
-        return pl.DataFrame({"note": ["FVTPL column not available (not mapped or not in source data)"]})
+        return pl.DataFrame(
+            {"note": ["FVTPL column not available (not mapped or not in source data)"]}
+        )
 
     agg: list[pl.Expr] = []
     if "ead" in df.columns:
         agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
     if "total_provision" in df.columns:
-        agg.append(pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision"))
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
     if "loan_id" in df.columns:
         agg.append(pl.col("loan_id").count().alias("Loan Count"))
     if not agg:
@@ -581,7 +691,9 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
     str_df = df.with_columns([pl.col(c).cast(pl.Utf8, strict=False) for c in cols])
     for ri, row in enumerate(str_df.rows(), 2):
         for ci, val in enumerate(row, 1):
-            cell = ws.cell(row=ri, column=ci, value=val if val not in (None, "None", "null") else None)
+            cell = ws.cell(
+                row=ri, column=ci, value=val if val not in (None, "None", "null") else None
+            )
             cell.font = data_font
 
     for ci, col in enumerate(cols, 1):
@@ -690,6 +802,7 @@ def run_ead_analytics(
 # ---------------------------------------------------------------------------
 # Summary stats (for the result page header cards)
 # ---------------------------------------------------------------------------
+
 
 def compute_summary_stats(df: pl.DataFrame) -> dict:
     """Return high-level numbers for the four stat cards on the results page."""

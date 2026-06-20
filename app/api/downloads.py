@@ -120,8 +120,11 @@ async def download_missing_data(run_id: str):
 
     # ── Sheet 2: Detail ──
     ws2 = wb.create_sheet("Detail")
-    detail_cols = [c for c in ["_row_num", "customer_id", "exception_code", "exception_description"]
-                   if c in missing_df.columns]
+    detail_cols = [
+        c
+        for c in ["_row_num", "customer_id", "exception_code", "exception_description"]
+        if c in missing_df.columns
+    ]
     if not detail_cols:
         detail_cols = missing_df.columns[:4]
 

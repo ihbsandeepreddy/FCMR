@@ -41,9 +41,11 @@ def test_list_categories():
         "identity_grouping",
     }
     cat_by_id = {c["id"]: c for c in cats}
-    assert cat_by_id["missing_data"]["count"] == 8   # 7 missing rules + address_completeness
+    assert cat_by_id["missing_data"]["count"] == 8  # 7 missing rules + address_completeness
     assert cat_by_id["kyc_format"]["count"] == 11
-    assert cat_by_id["address_pin"]["count"] == 3    # pincode_exists, state_pin_match, district_pin_match
+    assert (
+        cat_by_id["address_pin"]["count"] == 3
+    )  # pincode_exists, state_pin_match, district_pin_match
     assert cat_by_id["duplicates"]["count"] == 7
     assert cat_by_id["identity_grouping"]["count"] == 2
 

@@ -188,6 +188,12 @@ Upgrade to v0.1.30 or later. The fix includes:
 3. **Lifespan cleanup:** The FastAPI lifespan now calls `store.close_catalog()` on
    shutdown (in `app/main.py`).
 
+**Enhanced hardening (v0.1.31+):** Even with the above fixes, if the catalog *is* locked,
+the backend now **fails fast with a clear error** (within ~15 seconds) instead of hanging
+indefinitely. The error is logged to `error.log` and `backend.log`, and the desktop backend
+auto-attempts an orphan reap + retry on lock errors, so it self-heals without user
+intervention in most cases.
+
 ### Manual Recovery (v0.1.29 or v0.1.30+ with a crashed backend)
 If you hit this error:
 

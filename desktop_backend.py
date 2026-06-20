@@ -10,17 +10,67 @@ In production: PyInstaller creates an .exe that runs this on port 8765.
 import atexit
 import os
 import signal
+import subprocess
+import sys
+from datetime import UTC
 
 import uvicorn
+
+# Get backend port from environment (Electron launcher sets to 8765; dev default 8000)
+port = int(os.getenv("FCMR_BACKEND_PORT", "8000"))
+
+# Pre-import startup self-log (before app import, so even import failures are visible)
+log_dir = None
+try:
+    from fcmr_core.config import settings
+
+    log_dir = settings.data_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "backend.log"
+    with open(log_file, "a") as f:
+        from datetime import datetime
+
+        now = datetime.now(UTC).isoformat()
+        f.write(f"[{now}] backend process started (PID {os.getpid()}, port {port})\n")
+except Exception:
+    pass  # If logging fails, continue anyway
 
 # Import the app object directly so PyInstaller can resolve it in frozen bundles.
 # (String-based "app.main:app" fails in frozen mode because uvicorn can't import
 # by string when modules are bundled into a single binary.)
-from app.main import app  # noqa: E402
-from fcmr_core.catalog import store  # noqa: E402
-
-# Get backend port from environment (Electron launcher sets to 8765; dev default 8000)
-port = int(os.getenv("FCMR_BACKEND_PORT", "8000"))
+try:
+    from app.main import app  # noqa: E402
+    from fcmr_core.catalog import store  # noqa: E402
+except RuntimeError as e:
+    # Catalog lock — attempt one self-heal via orphan reap, then retry
+    if "locked" in str(e).lower():
+        if log_dir:
+            log_file = log_dir / "backend.log"
+            with open(log_file, "a") as f:
+                now = datetime.now(UTC).isoformat() if "datetime" in dir() else "?"
+                f.write(f"[{now}] catalog locked, attempting orphan reap...\n")
+        try:
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", "sangir-backend.exe"],
+                    stderr=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    timeout=5,
+                )
+        except Exception:
+            pass
+        # Retry import once
+        try:
+            from app.main import app  # noqa: E402
+            from fcmr_core.catalog import store  # noqa: E402
+        except Exception as retry_err:
+            if log_dir:
+                log_file = log_dir / "backend.log"
+                with open(log_file, "a") as f:
+                    f.write(f"[?] fatal: {retry_err}\n")
+            raise
+    else:
+        raise
 
 
 def _cleanup():

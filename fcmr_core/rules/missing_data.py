@@ -69,8 +69,9 @@ def rule_pan_missing(df: pl.DataFrame) -> pl.DataFrame:
 
 @register("aadhaar_missing", "Aadhaar: field present check")
 def rule_aadhaar_missing(df: pl.DataFrame) -> pl.DataFrame:
-    return _missing_rule(df, "aadhaar_missing", "aadhaar", "AADHAAR_MISSING", "Aadhaar",
-                         strip_chars=" -")
+    return _missing_rule(
+        df, "aadhaar_missing", "aadhaar", "AADHAAR_MISSING", "Aadhaar", strip_chars=" -"
+    )
 
 
 @register("voter_id_missing", "Voter ID: field present check")
@@ -80,8 +81,9 @@ def rule_voter_id_missing(df: pl.DataFrame) -> pl.DataFrame:
 
 @register("mobile_missing", "Mobile: field present check")
 def rule_mobile_missing(df: pl.DataFrame) -> pl.DataFrame:
-    return _missing_rule(df, "mobile_missing", "mobile", "MOBILE_MISSING", "Mobile number",
-                         strip_chars=" -+")
+    return _missing_rule(
+        df, "mobile_missing", "mobile", "MOBILE_MISSING", "Mobile number", strip_chars=" -+"
+    )
 
 
 @register("email_missing", "Email: field present check")

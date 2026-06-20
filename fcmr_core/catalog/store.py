@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,6 +12,9 @@ from pathlib import Path
 import duckdb
 
 from fcmr_core.config import apply_duckdb_limits, settings
+from fcmr_core.logging_setup import get_logger
+
+logger = get_logger("error")
 
 # Single persistent connection to catalog.duckdb, shared across all threads in
 # this process. DuckDB allows multiple cursors on one connection concurrently.
@@ -29,12 +33,32 @@ def _conn() -> duckdb.DuckDBPyConnection:
     the underlying file handle stays open, avoiding the OS file-lock that
     occurs when a new duckdb.connect() call races with an existing one from a
     reloading uvicorn worker.
+
+    Connects with a bounded timeout (up to ~15 seconds total) to fail fast if
+    the catalog is locked by another process, rather than hanging indefinitely.
     """
     global _db_conn
     with _db_lock:
         if _db_conn is None:
-            _db_conn = duckdb.connect(str(settings.catalog_path))
-            apply_duckdb_limits(_db_conn)
+            # Bounded retry: up to 3 attempts, ~5 seconds apart
+            last_error = None
+            for attempt in range(3):
+                try:
+                    _db_conn = duckdb.connect(str(settings.catalog_path))
+                    apply_duckdb_limits(_db_conn)
+                    return _db_conn.cursor()
+                except Exception as e:
+                    last_error = e
+                    if attempt < 2:
+                        time.sleep(5)
+            # All attempts failed
+            error_msg = (
+                f"catalog.duckdb is locked by another instance or inaccessible. "
+                f"Close other copies of SanGir Automations and restart. "
+                f"Error: {last_error}"
+            )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from last_error
     return _db_conn.cursor()
 
 
@@ -524,11 +548,12 @@ def delete_upload(upload_id: str) -> None:
         con.execute(f"DROP TABLE IF EXISTS {table_name}")
         con.execute("DELETE FROM uploads WHERE upload_id=?", [upload_id])
     # Clean up output files on disk
-    from fcmr_core.config import settings
+
     for row in run_rows:
         for path_str in row:
             if path_str:
                 from pathlib import Path
+
                 p = Path(path_str)
                 p.unlink(missing_ok=True)
                 try:
@@ -693,7 +718,15 @@ def create_ead_run(engagement_id: str) -> str:
 
 
 def update_ead_run(run_id: str, **kwargs) -> None:
-    allowed = {"status", "started_at", "finished_at", "output_dir", "error", "progress_step", "progress_pct"}
+    allowed = {
+        "status",
+        "started_at",
+        "finished_at",
+        "output_dir",
+        "error",
+        "progress_step",
+        "progress_pct",
+    }
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
         return

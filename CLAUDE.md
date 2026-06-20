@@ -649,6 +649,7 @@ server-rendered.
 | **Selected categories are persisted** (v0.1.30) | Run-detail labels which categories were chosen; supports selective re-runs | Always call `update_run(selected_rules=...)` when mode != "all" |
 | **DuckDB memory limits on every analytics connection** (v0.1.30) | Prevents OOM on large files; enables graceful disk spill on constrained systems | Apply limits immediately after `duckdb.connect()` in all analytics paths |
 | **Catalog connection closed on shutdown** (v0.1.30) | Graceful release of DuckDB single-writer lock; allows Electron to reap orphaned processes | Call `store.close_catalog()` in lifespan shutdown + signal handlers on desktop |
+| **Catalog connect is bounded/fails-fast** (v0.1.31) | `duckdb.connect()` is wrapped with a ~15s timeout + retry; fails fast with a logged error instead of hanging indefinitely when the catalog is locked | Always log lock errors clearly; desktop backend self-heals via orphan reap + retry on lock |
 
 ---
 

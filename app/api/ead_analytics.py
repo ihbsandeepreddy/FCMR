@@ -116,12 +116,14 @@ async def ead_run_status(run_id: str):
     run = store.get_ead_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="EAD run not found")
-    return JSONResponse({
-        "status": run["status"],
-        "progress_step": run.get("progress_step") or "",
-        "progress_pct": run.get("progress_pct") or 0,
-        "error": run.get("error") or "",
-    })
+    return JSONResponse(
+        {
+            "status": run["status"],
+            "progress_step": run.get("progress_step") or "",
+            "progress_pct": run.get("progress_pct") or 0,
+            "error": run.get("error") or "",
+        }
+    )
 
 
 @router.get("/ead/runs/{run_id}", response_class=HTMLResponse)
@@ -152,7 +154,13 @@ async def ead_run_detail(request: Request, run_id: str):
                 except Exception:
                     previews[key] = {"label": sheet_name, "cols": [], "rows": [], "total_rows": 0}
             else:
-                previews[key] = {"label": sheet_name, "cols": [], "rows": [], "total_rows": 0, "missing": True}
+                previews[key] = {
+                    "label": sheet_name,
+                    "cols": [],
+                    "rows": [],
+                    "total_rows": 0,
+                    "missing": True,
+                }
 
         context["previews"] = previews
 
@@ -186,7 +194,9 @@ async def ead_download_report(run_id: str, report: str):
         return StreamingResponse(
             io.BytesIO(data),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="EAD_Analytics_{run_id[:8]}.xlsx"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="EAD_Analytics_{run_id[:8]}.xlsx"'
+            },
         )
 
     csv_path = output_dir / f"{report}.csv"

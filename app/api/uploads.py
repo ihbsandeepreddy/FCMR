@@ -10,11 +10,10 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+import polars as pl
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-
-import polars as pl
 
 from fcmr_core.catalog import store
 from fcmr_core.config import settings

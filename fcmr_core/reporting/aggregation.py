@@ -111,9 +111,7 @@ def aggregate_missing_data(long_csv_path: Path, total_rows: int) -> list[dict]:
         return []
 
     try:
-        df = pl.read_csv(
-            long_csv_path, columns=["exception_code"], infer_schema_length=0
-        )
+        df = pl.read_csv(long_csv_path, columns=["exception_code"], infer_schema_length=0)
         counts: dict[str, int] = {}
         for code in df["exception_code"]:
             if code and code in _MISSING_CODES:
