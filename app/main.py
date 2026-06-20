@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup: SanGir Automations ready")
     yield
     logger.info("Application shutdown")
+    store.close_catalog()
 
 
 app = FastAPI(
