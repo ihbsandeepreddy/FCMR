@@ -594,7 +594,11 @@ mostly `oklch`):
   underscored name (see `index.html`/`upload.html`).
 - Sidebar nav highlights via `request.url.path` checks; keep new pages consistent.
 - Brand string is **"SanGir Automations"** (logo at `/static/img/sangir-logo.png`); the repo
-  name "FCMR" is internal only.
+  name "FCMR" is internal only. The sidebar shows the logo **only** — the textual
+  "SanGir Automations" label below it was removed (the badge is self-branding). The logo is a
+  **transparent PNG** (background chroma-keyed out, original preserved at
+  `sangir-logo-original.png`) so it floats on the beige `--sidebar-bg` with no boxed divider.
+  Re-cut deterministically via numpy RGB-distance keying if the source art changes (invariant #1).
 - Upload UX: client picks file → if > 4 MB and Blob configured, browser uploads to Vercel Blob
   and registers the URL; else standard XHR with a progress bar.
 

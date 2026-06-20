@@ -1,10 +1,14 @@
-feat: Phase 4b/4c — Logo presentation: float & resize (sans background-cut)
+feat: Phase 4a — transparent floating logo (completes Phase 4)
 
-- Removed .sidebar-branding text block (SanGir Automations title + version) from base.html
-- Updated .sidebar-logo: height 120px, padding 18px 16px, removed border-bottom
-- Updated .sidebar-logo-img: max-width 188px, max-height 96px (larger badge)
-- Removed unused .sidebar-logo-mark dead code
+- Chroma-keyed the textured beige background out of sangir-logo.png via a
+  deterministic numpy RGB-distance key with edge feathering (invariant #1: no AI/ML).
+  Background beige RGB(222,206,178); transparent <45 dist, opaque >95, linear feather between.
+- Result verified: corners alpha=0, navy text alpha=255, 88.3% transparent / 11.1% opaque /
+  0.7% feathered edges; clean on white (no halo) and floats on the exact --sidebar-bg beige.
+- Preserved the original art at static/img/sangir-logo-original.png (never overwrite w/o backup).
+- Updated CLAUDE.md §16 to document the transparent floating logo + text-label removal.
 
-NOTE: 4a (transparent logo image via Pillow chroma-key) is pending — requires capable model to cut background and visually verify. Once 4a lands, the logo will float transparently on the beige sidebar.
+With Phase 4b/4c (already shipped in 0.1.37), the sidebar now shows only the badge,
+floating on the beige with no divider and no "SanGir Automations" text beneath it.
 
-Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
