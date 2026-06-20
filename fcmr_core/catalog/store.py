@@ -38,6 +38,22 @@ def _conn() -> duckdb.DuckDBPyConnection:
     return _db_conn.cursor()
 
 
+def close_catalog() -> None:
+    """Close the persistent catalog connection (graceful shutdown).
+
+    Idempotent. Called on shutdown to release the DuckDB single-writer lock,
+    allowing a new process to open the catalog without blocking.
+    """
+    global _db_conn
+    with _db_lock:
+        if _db_conn is not None:
+            try:
+                _db_conn.close()
+            except Exception:
+                pass
+            _db_conn = None
+
+
 def init_catalog() -> None:
     with _conn() as con:
         # Users table
@@ -347,12 +363,12 @@ def set_batch_consolidated(batch_id: str, consolidated_upload_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_run(upload_id: str) -> str:
+def create_run(upload_id: str, engagement_id: str | None = None) -> str:
     rid = str(uuid.uuid4())
     with _conn() as con:
         con.execute(
-            "INSERT INTO runs (run_id, upload_id, status) VALUES (?, ?, 'pending')",
-            [rid, upload_id],
+            "INSERT INTO runs (run_id, upload_id, engagement_id, status) VALUES (?, ?, ?, 'pending')",
+            [rid, upload_id, engagement_id],
         )
     return rid
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -65,6 +66,7 @@ async def runs_list(request: Request):
 
 @router.post("/runs/start")
 async def runs_start(
+    request: Request,
     background_tasks: BackgroundTasks,
     upload_id: str = Form(...),
     mode: str = Form("all"),
@@ -77,13 +79,16 @@ async def runs_start(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
-    run_id = store.create_run(upload_id)
+    engagement_id = request.session.get("engagement_id")
+    run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
 
     if mode == "all":
         rule_ids = None
     else:
         rule_ids = resolve_rule_ids(categories or [], rules or [])
+        # Persist selected rules for display in run_detail
+        store.update_run(run_id, selected_rules=json.dumps(rule_ids or []))
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
@@ -91,6 +96,7 @@ async def runs_start(
 
 @router.post("/uploads/{upload_id}/run")
 async def start_run(
+    request: Request,
     upload_id: str,
     background_tasks: BackgroundTasks,
     mode: str = Form("all"),
@@ -103,7 +109,8 @@ async def start_run(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
-    run_id = store.create_run(upload_id)
+    engagement_id = request.session.get("engagement_id")
+    run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
 
     # Resolve category selection to rule_ids
@@ -119,6 +126,8 @@ async def start_run(
             rules,
             rule_ids,
         )
+        # Persist selected rules for display in run_detail
+        store.update_run(run_id, selected_rules=json.dumps(rule_ids or []))
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
 
@@ -414,9 +423,11 @@ async def export_workpaper(run_id: str):
         population = len(df)
         exception_count = sum(1 for val in df["overall_status"] if val != "OK")
 
+        # Use resolved engagement_id (fallback to "default" if missing)
+        resolved_engagement_id = engagement_id or "default"
         sample_records = select_sample(
             wide_path,
-            engagement_id=run["engagement_id"],
+            engagement_id=resolved_engagement_id,
             run_id=run_id,
             population=population,
             exception_count=exception_count,
