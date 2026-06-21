@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from fcmr_core.backup import create_backup
+from fcmr_core.backup import create_backup, list_backups
 from fcmr_core.catalog import store
 from fcmr_core.security import hash_password, verify_password
 
@@ -21,10 +21,11 @@ templates = Jinja2Templates(directory=str(_templates_dir))
 async def settings_page(request: Request):
     """Render settings page."""
     settings = store.list_settings()
+    backups = list_backups()
     return templates.TemplateResponse(
         request=request,
         name="settings.html",
-        context={"settings": settings},
+        context={"settings": settings, "backups": backups},
     )
 
 
