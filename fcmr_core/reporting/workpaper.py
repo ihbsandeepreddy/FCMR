@@ -31,6 +31,7 @@ from fcmr_core.reporting.excel_style import (
     HEADER_FONT,
     QUANTITY_FORMAT_INT,
     THIN_BORDER,
+    add_signoff_block,
     apply_header_style,
     auto_column_widths,
     freeze_header,
@@ -296,16 +297,9 @@ def _build_cover_sheet(
     ws[f"B{row}"] = datetime.now(UTC).strftime("%Y-%m-%d")
     row += 2
 
-    # Sign-off block
-    ws[f"A{row}"] = "Prepared By:"
-    ws[f"B{row}"] = ""
-    ws[f"C{row}"] = ""
-    row += 1
-
-    ws[f"A{row}"] = "Signature:"
-    ws[f"B{row}"] = ""
-    ws[f"C{row}"] = ""
-    row += 1
+    # Sign-off block (prepared by)
+    add_signoff_block(ws, row, "Prepared By")
+    row += 4
 
     ws[f"A{row}"] = "Date:"
     ws[f"B{row}"] = ""
@@ -550,6 +544,10 @@ def _build_lead_sheet(
     ws.column_dimensions["G"].width = 12
     # Note: no freeze/autofilter here — the Lead sheet is a non-tabular summary
     # (title, info, breakdown, procedures sub-table, prose), not a single table.
+
+    # Add reviewed-by sign-off block at the end
+    max_row = ws.max_row
+    add_signoff_block(ws, max_row + 3, "Reviewed By")
 
 
 def _build_detailed_exceptions_sheet(
