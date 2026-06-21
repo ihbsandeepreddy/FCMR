@@ -19,6 +19,12 @@
   </div>
 </div>
 
+{# Low-Tier Hardware Warning #}
+<div id="tier-warning" style="display:none;" class="notice notice-warn">
+  <strong>⚠️ Low-tier hardware detected.</strong> DuckDB memory is limited to 3 GB.
+  Keep uploads under ~50k rows to avoid memory issues. Consider reducing fuzzy-match threshold if uploads fail.
+</div>
+
 {# DuckDB Configuration Card #}
 <div class="card" id="duckdb-config-card">
   <div class="card-title">DuckDB Configuration</div>
@@ -234,6 +240,11 @@
       document.getElementById('duckdb-memory').textContent = data.duckdb.memory_limit;
       document.getElementById('duckdb-threads').textContent = data.duckdb.threads;
       document.getElementById('spill-dir').textContent = data.duckdb.temp_directory;
+
+      // Show tier warning for low-tier hardware
+      if (data.hardware.tier === 'low') {
+        document.getElementById('tier-warning').style.display = 'block';
+      }
     } catch (e) {
       console.error('Failed to load system info:', e);
     }
