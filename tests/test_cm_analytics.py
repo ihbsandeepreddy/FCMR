@@ -6,6 +6,7 @@ import polars as pl
 
 from fcmr_core.analytics.cm_analytics import (
     generate_aadhaar_coverage,
+    generate_bank_account_anomalies,
     generate_coapplicant_concentration,
     generate_fraud_risk_flags,
 )
@@ -182,3 +183,50 @@ def test_coapplicant_concentration_no_column():
 
     assert "note" in result.columns
     assert result[0, "note"] == "coapplicant_mobile column required"
+
+
+def test_bank_account_anomalies_invalid_length():
+    """Test detection of invalid account length."""
+    df = pl.DataFrame(
+        {
+            "customer_id": ["C001", "C002", "C003"],
+            "bank_account": ["123456789", "12345678", "123456789012345"],  # 9, 8, 15 digits
+        }
+    )
+
+    result = generate_bank_account_anomalies(df)
+
+    invalid_length = result.filter(pl.col("Anomaly Type") == "Invalid Account Length")
+    assert len(invalid_length) > 0
+    assert invalid_length[0, "Customer Count"] == 1  # Only 8-digit account is invalid
+
+
+def test_bank_account_anomalies_invalid_ifsc():
+    """Test detection of invalid IFSC format."""
+    df = pl.DataFrame(
+        {
+            "customer_id": ["C001", "C002"],
+            "bank_account": ["123456789012", "234567890123"],
+            "ifsc": ["ICIC0ABCD", "INVALID"],  # Valid (4+0+4), invalid format
+        }
+    )
+
+    result = generate_bank_account_anomalies(df)
+
+    invalid_ifsc = result.filter(pl.col("Anomaly Type") == "Invalid IFSC Format")
+    assert len(invalid_ifsc) > 0
+    assert invalid_ifsc[0, "Customer Count"] == 1
+
+
+def test_bank_account_anomalies_no_column():
+    """Test when bank_account column is missing."""
+    df = pl.DataFrame(
+        {
+            "customer_id": ["C001", "C002"],
+        }
+    )
+
+    result = generate_bank_account_anomalies(df)
+
+    assert "note" in result.columns
+    assert result[0, "note"] == "bank_account column required"

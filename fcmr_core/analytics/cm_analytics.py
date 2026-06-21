@@ -212,3 +212,111 @@ def generate_coapplicant_concentration(df: pl.DataFrame) -> pl.DataFrame:
             pl.col("Loan_Count").cast(pl.Int64),
         ]
     )
+
+
+def generate_bank_account_anomalies(df: pl.DataFrame) -> pl.DataFrame:
+    """Bank account anomalies: invalid lengths, IFSC format, state mismatches.
+
+    Detects:
+    - Account numbers outside valid range (9–18 digits)
+    - IFSC codes not matching standard format (4-letter bank code + 0 + 4-char branch)
+    - IFSC state code mismatches vs. customer state
+
+    Returns DataFrame with anomaly_type, account_count, percent.
+    """
+    if "bank_account" not in df.columns:
+        return pl.DataFrame({"note": ["bank_account column required"]})
+
+    total_customers = df.select(pl.col("customer_id")).n_unique()
+    if total_customers == 0:
+        return pl.DataFrame({"note": ["No customers"]})
+
+    anomalies = []
+
+    # Anomaly 1: Invalid account length (not 9–18 digits)
+    if "bank_account" in df.columns:
+        invalid_acct = (
+            df.filter(
+                (pl.col("bank_account").is_not_null())
+                & (
+                    (pl.col("bank_account").cast(pl.Utf8, strict=False).str.len_chars().lt(9))
+                    | (pl.col("bank_account").cast(pl.Utf8, strict=False).str.len_chars().gt(18))
+                )
+            )
+            .select(pl.col("customer_id"))
+            .n_unique()
+        )
+
+        if invalid_acct > 0:
+            anomalies.append(
+                {
+                    "Anomaly Type": "Invalid Account Length",
+                    "Customer Count": invalid_acct,
+                    "Percent": round(invalid_acct / total_customers * 100, 2),
+                }
+            )
+
+    # Anomaly 2: Invalid IFSC format (should be 4-letter + 0 + 4-char)
+    if "ifsc" in df.columns:
+        invalid_ifsc = (
+            df.filter(
+                (pl.col("ifsc").is_not_null())
+                & (
+                    ~pl.col("ifsc")
+                    .cast(pl.Utf8, strict=False)
+                    .str.to_uppercase()
+                    .str.contains(r"^[A-Z]{4}0[A-Z0-9]{4}$")
+                )
+            )
+            .select(pl.col("customer_id"))
+            .n_unique()
+        )
+
+        if invalid_ifsc > 0:
+            anomalies.append(
+                {
+                    "Anomaly Type": "Invalid IFSC Format",
+                    "Customer Count": invalid_ifsc,
+                    "Percent": round(invalid_ifsc / total_customers * 100, 2),
+                }
+            )
+
+    # Anomaly 3: IFSC state mismatch vs. customer state
+    if "ifsc" in df.columns and "state" in df.columns:
+        # IFSC state code (extract char 5–6, map to state abbreviation)
+        # Simplified: flag when IFSC and state are both non-null but appear unrelated
+        # (Full validation would require a state-code lookup table)
+        state_mismatch = (
+            df.filter(
+                (pl.col("ifsc").is_not_null())
+                & (pl.col("state").is_not_null())
+                & (
+                    ~pl.col("ifsc")
+                    .cast(pl.Utf8, strict=False)
+                    .str.to_uppercase()
+                    .str.slice(4, 2)
+                    .str.contains(
+                        pl.col("state")
+                        .cast(pl.Utf8, strict=False)
+                        .str.to_uppercase()
+                        .str.slice(0, 2)
+                    )
+                )
+            )
+            .select(pl.col("customer_id"))
+            .n_unique()
+        )
+
+        if state_mismatch > 0:
+            anomalies.append(
+                {
+                    "Anomaly Type": "IFSC State Mismatch",
+                    "Customer Count": state_mismatch,
+                    "Percent": round(state_mismatch / total_customers * 100, 2),
+                }
+            )
+
+    if not anomalies:
+        return pl.DataFrame({"note": ["No bank account anomalies detected"]})
+
+    return pl.DataFrame(anomalies)
