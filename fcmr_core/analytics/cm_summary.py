@@ -76,8 +76,8 @@ def generate_kyc_completeness(df: pl.DataFrame) -> pl.DataFrame:
         present = (
             df.select(pl.col(field))
             .filter(pl.col(field).is_not_null())
-            .filter(pl.col(field).cast(pl.Utf8, strict=False).str.lengths() > 0)
-            .len()
+            .filter(pl.col(field).cast(pl.Utf8, strict=False).str.len_chars() > 0)
+            .height
         )
         missing = total_rows - present
         pct = (present / total_rows * 100) if total_rows > 0 else 0
@@ -194,7 +194,7 @@ def generate_duplication_summary(df: pl.DataFrame) -> pl.DataFrame:
 
     results = []
     for dup_rule in duplicate_rules:
-        count = df.filter((pl.col("rule_id") == dup_rule) & (pl.col("status") == "ERROR")).len()
+        count = df.filter((pl.col("rule_id") == dup_rule) & (pl.col("status") == "ERROR")).height
         results.append(
             {
                 "Duplicate Type": dup_rule.replace("_", " ").title(),
@@ -227,7 +227,7 @@ def generate_coapplicant_overlap(df: pl.DataFrame) -> pl.DataFrame:
         & pl.col("coapplicant_mobile").map_elements(
             lambda x: x in mobile_set, return_dtype=pl.Boolean
         )
-    ).len()
+    ).height
 
     no_overlap_count = len(df) - overlap_count
 
@@ -332,8 +332,8 @@ def generate_data_quality_summary(df: pl.DataFrame) -> pl.DataFrame:
         present = (
             df.select(pl.col(col))
             .filter(pl.col(col).is_not_null())
-            .filter(pl.col(col).cast(pl.Utf8, strict=False).str.lengths() > 0)
-            .len()
+            .filter(pl.col(col).cast(pl.Utf8, strict=False).str.len_chars() > 0)
+            .height
         )
         missing = total_rows - present
         pct_missing = (missing / total_rows * 100) if total_rows > 0 else 0
