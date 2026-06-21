@@ -591,15 +591,19 @@ def _build_detailed_exceptions_sheet(
 
         col_names = exc_df.columns
 
-        # Header row with styling
-        for col_idx, col_name in enumerate(col_names, 1):
+        # Header row: "Ref #" + original columns
+        ws.cell(row=1, column=1, value="Ref #").fill = header_fill
+        ws.cell(row=1, column=1).font = header_font
+        for col_idx, col_name in enumerate(col_names, 2):
             cell = ws.cell(row=1, column=col_idx, value=col_name)
             cell.fill = header_fill
             cell.font = header_font
 
-        # Data rows via batch append (no per-cell borders; much faster)
-        for row_vals in exc_df.iter_rows(allow_na=True):
-            ws.append(row_vals)
+        # Data rows: prepend ref number, then original columns
+        for ref_num, row_vals in enumerate(exc_df.iter_rows(allow_na=True), 1):
+            ws.cell(row=ref_num + 1, column=1, value=ref_num)
+            for col_idx, val in enumerate(row_vals, 2):
+                ws.cell(row=ref_num + 1, column=col_idx, value=val)
 
         # Freeze top row and enable autofilter
         freeze_header(ws)

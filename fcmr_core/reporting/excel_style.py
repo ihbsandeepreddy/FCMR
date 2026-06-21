@@ -120,3 +120,23 @@ def add_signoff_block(ws, start_row: int, title: str = "Sign-Off"):
             cell.border = border
             cell.alignment = Alignment(horizontal="left", vertical="top")
             ws.row_dimensions[start_row + row_offset].height = 20
+
+
+def add_reference_hyperlink(ws, row: int, col: int | str, ref_sheet: str, ref_row: int):
+    """Add a hyperlink to another sheet (for cross-referencing).
+
+    Args:
+        ws: openpyxl worksheet
+        row: Row number
+        col: Column index (int) or letter (str)
+        ref_sheet: Name of target sheet
+        ref_row: Row number in target sheet
+    """
+    from openpyxl.utils import get_column_letter
+
+    if isinstance(col, int):
+        col = get_column_letter(col)
+
+    cell = ws[f"{col}{row}"]
+    cell.hyperlink = f"'{ref_sheet}'!A{ref_row}"
+    cell.font = Font(color="0563C1", underline="single")  # Blue underlined (hyperlink style)
