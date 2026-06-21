@@ -110,6 +110,11 @@ def list_rules() -> list[RuleMeta]:
     return list(_REGISTRY)
 
 
+# Rules that PRODUCE the `ucid` column, which the duplicate rules CONSUME for
+# same-UCID/distinct-LAN scoping. These must run before their consumers.
+_UCID_PRODUCERS = {"ucid"}
+
+
 _NUMERIC_CANONICALS = {
     "loan_amount",
     "outstanding_principal",
@@ -204,10 +209,22 @@ def run_pipeline(
     _ensure_rules_loaded()
     df = _coerce_str_columns(df)
     if rule_ids is None:
-        selected_registry = _REGISTRY
+        selected_registry = list(_REGISTRY)
     else:
         selected_set = set(rule_ids)
         selected_registry = [m for m in _REGISTRY if m.rule_id in selected_set]
+
+    # Dependency ordering: the duplicate rules read the `ucid` column to scope
+    # shared-key duplicates (same UCID + distinct LAN ⇒ allowed). Registration /
+    # import order does NOT guarantee `ucid` runs first (it is imported last), which
+    # left the `ucid` column absent when the duplicate rules executed and silently
+    # disabled the scoping. Hoist any selected `ucid`-producing rule ahead of the
+    # rest so its column exists before consumers run. (When `ucid` is not selected,
+    # the duplicate rules fall back to flagging every shared key, as before.)
+    if any(m.rule_id in _UCID_PRODUCERS for m in selected_registry):
+        producers = [m for m in selected_registry if m.rule_id in _UCID_PRODUCERS]
+        rest = [m for m in selected_registry if m.rule_id not in _UCID_PRODUCERS]
+        selected_registry = producers + rest
 
     total = len(selected_registry)
     for idx, meta in enumerate(selected_registry):
