@@ -29,10 +29,12 @@ from fcmr_core.logging_setup import get_logger
 from fcmr_core.reporting.excel_style import (
     HEADER_FILL,
     HEADER_FONT,
+    PERCENT_FORMAT,
     QUANTITY_FORMAT_INT,
     THIN_BORDER,
     add_signoff_block,
     apply_header_style,
+    apply_number_format,
     auto_column_widths,
     freeze_header,
 )
@@ -505,8 +507,9 @@ def _build_lead_sheet(
             ws[f"E{row}"] = proc["severity"]
             ws[f"F{row}"] = proc["exceptions"]
             ws[f"F{row}"].number_format = QUANTITY_FORMAT_INT
-            exc_pct = (proc["exceptions"] / total_records * 100) if total_records > 0 else 0
-            ws[f"G{row}"] = f"{exc_pct:.1f}%"
+            exc_pct = (proc["exceptions"] / total_records) if total_records > 0 else 0
+            ws[f"G{row}"] = exc_pct
+            apply_number_format(ws, row, "G", PERCENT_FORMAT)
             row += 1
     except Exception:
         pass

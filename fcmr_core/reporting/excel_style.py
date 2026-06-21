@@ -47,6 +47,12 @@ QUANTITY_FORMAT = "#,##0.00"
 # Thousands separator, no decimals
 QUANTITY_FORMAT_INT = "#,##0"
 
+# Date format (YYYY-MM-DD)
+DATE_FORMAT = "YYYY-MM-DD"
+
+# Count format (no decimals, thousands separator)
+COUNT_FORMAT = "#,##0"
+
 
 def apply_header_style(ws, row: int = 1):
     """Apply header styling to the first row of a worksheet.
@@ -140,3 +146,39 @@ def add_reference_hyperlink(ws, row: int, col: int | str, ref_sheet: str, ref_ro
     cell = ws[f"{col}{row}"]
     cell.hyperlink = f"'{ref_sheet}'!A{ref_row}"
     cell.font = Font(color="0563C1", underline="single")  # Blue underlined (hyperlink style)
+
+
+def apply_number_format(ws, row: int, col: int | str, format_code: str):
+    """Apply a number format to a cell.
+
+    Args:
+        ws: openpyxl worksheet
+        row: Row number
+        col: Column index (int) or letter (str)
+        format_code: Excel format code (e.g., PERCENT_FORMAT, DATE_FORMAT)
+    """
+    from openpyxl.utils import get_column_letter
+
+    if isinstance(col, int):
+        col = get_column_letter(col)
+
+    ws[f"{col}{row}"].number_format = format_code
+
+
+def apply_range_format(ws, start_row: int, end_row: int, col: int | str, format_code: str):
+    """Apply a number format to a range of cells in a column.
+
+    Args:
+        ws: openpyxl worksheet
+        start_row: Starting row number
+        end_row: Ending row number (inclusive)
+        col: Column index (int) or letter (str)
+        format_code: Excel format code
+    """
+    from openpyxl.utils import get_column_letter
+
+    if isinstance(col, int):
+        col = get_column_letter(col)
+
+    for row in range(start_row, end_row + 1):
+        ws[f"{col}{row}"].number_format = format_code
