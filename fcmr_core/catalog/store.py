@@ -559,6 +559,35 @@ def update_password(username: str, password_hash: str) -> None:
         )
 
 
+def list_users() -> list[dict]:
+    """List all users with their roles and metadata."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT username, display_name, role, created_at
+            FROM users
+            ORDER BY created_at ASC
+            """).fetchall()
+
+    return [
+        {
+            "username": row[0],
+            "display_name": row[1],
+            "role": row[2] or "admin",  # Default to admin if NULL
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
+
+
+def set_role(username: str, role: str) -> None:
+    """Set user's role ('admin' or 'user')."""
+    if role not in ("admin", "user"):
+        raise ValueError(f"Invalid role: {role}")
+
+    with _conn() as con:
+        con.execute("UPDATE users SET role=? WHERE username=?", [role, username])
+
+
 # ---------------------------------------------------------------------------
 # Rule Configuration (per-engagement disabled rules)
 # ---------------------------------------------------------------------------
