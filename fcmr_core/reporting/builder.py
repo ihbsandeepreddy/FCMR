@@ -18,10 +18,35 @@ from pathlib import Path
 import polars as pl
 
 _EXC_STATUS_RE = re.compile(r"^_exc_(.+)_status$")
+_AADHAAR_COL_RE = re.compile(r"aadha?ar", re.IGNORECASE)
 
 # Severity order for overall_status rollup
 _SEVERITY = {"OK": 0, "WARN": 1, "ERROR": 2}
 _SEVERITY_REV = {0: "OK", 1: "WARN", 2: "ERROR"}
+
+
+def _mask_aadhaar_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Mask any Aadhaar-like column to ``XXXXXXXX`` + last 4 digits.
+
+    Invariant #2: a full Aadhaar must never appear in any output. The wide CSV is a
+    downloadable deliverable, so mask the raw value here (dedup/grouping already use
+    a salted hash, never the raw value).
+    """
+    aadhaar_cols = [c for c in df.columns if _AADHAAR_COL_RE.search(c)]
+    if not aadhaar_cols:
+        return df
+    exprs = []
+    for c in aadhaar_cols:
+        col = pl.col(c).cast(pl.Utf8, strict=False)
+        cleaned = col.str.replace_all(r"[\s-]", "")
+        masked = (
+            pl.when(cleaned.str.len_chars() >= 5)
+            .then(pl.lit("XXXXXXXX") + cleaned.str.slice(-4))
+            .otherwise(col)
+            .alias(c)
+        )
+        exprs.append(masked)
+    return df.with_columns(exprs)
 
 
 def build_exception_csvs(
@@ -107,6 +132,7 @@ def build_exception_csvs(
             ]
         )
 
+    wide_df = _mask_aadhaar_columns(wide_df)
     wide_df.write_csv(str(wide_path))
 
     # ---- Long CSV (vectorized per rule) ---------------------------------

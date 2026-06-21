@@ -42,11 +42,15 @@ def rule_beneficiary_tagging(df: pl.DataFrame) -> pl.DataFrame:
     mobiles = _col_or_empty(df, "mobile")
     names = _col_or_empty(df, "full_name")
     dobs = _col_or_empty(df, "dob")
+    cids = _col_or_empty(df, "customer_id")
+    rownums = _col_or_empty(df, "_row_num")
 
     customer_keys: list[str] = []
     group_keys: list[str] = []  # canonical linkage key before grouping
 
-    for pan, aadh_raw, mob, name, dob in zip(pans, aadhaar_raws, mobiles, names, dobs):
+    for i, (pan, aadh_raw, mob, name, dob, cid, rownum) in enumerate(
+        zip(pans, aadhaar_raws, mobiles, names, dobs, cids, rownums)
+    ):
         pan_norm = (pan or "").strip().upper()
         aadh_hash = _hash_aadhaar(aadh_raw)
         mob_norm = (mob or "").strip().replace(" ", "").replace("-", "")
@@ -70,7 +74,12 @@ def rule_beneficiary_tagging(df: pl.DataFrame) -> pl.DataFrame:
             ck = "NDB:" + _sha8(name_dob)
             gk = "NDB:" + _sha8(name_dob)
         else:
-            ck = "UNK:" + _sha8(str(id(pan)) + str(id(mob)))
+            # No usable identifier: the row cannot be linked to any other, so it
+            # forms its own group. Derive a DETERMINISTIC per-row token (invariant
+            # #3) from customer_id, then _row_num, then the positional index — never
+            # Python's id(), which changes every run.
+            row_token = (cid or "").strip() or (rownum or "").strip() or f"row:{i}"
+            ck = "UNK:" + _sha8(row_token)
             gk = ck
 
         customer_keys.append(ck)

@@ -347,6 +347,11 @@ def rule_email_format(df: pl.DataFrame) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+def _calendar_age(parsed: date, today: date) -> int:
+    """Whole-year age, leap-year-correct (avoids the `days // 365` drift)."""
+    return today.year - parsed.year - ((today.month, today.day) < (parsed.month, parsed.day))
+
+
 @register("dob_validity", "Date of birth: valid date, age 1â€“100 years")
 def rule_dob_validity(df: pl.DataFrame) -> pl.DataFrame:
     series = _col_or_empty(df, "dob")
@@ -369,7 +374,7 @@ def rule_dob_validity(df: pl.DataFrame) -> pl.DataFrame:
             codes.append("DOB_FUTURE_DATE")
             descs.append(f"DOB '{val}' is a future date")
         else:
-            age = (today - parsed).days // 365
+            age = _calendar_age(parsed, today)
             if age > 100:
                 statuses.append("ERROR")
                 codes.append("DOB_AGE_IMPLAUSIBLE")
@@ -403,7 +408,7 @@ def rule_dob_age_range(df: pl.DataFrame) -> pl.DataFrame:
             codes.append("")
             descs.append("")  # Invalid/future DOB handled by dob_validity
             continue
-        age = (today - parsed).days // 365
+        age = _calendar_age(parsed, today)
         if age < 18:
             statuses.append("WARN")
             codes.append("DOB_AGE_OUT_OF_RANGE")
