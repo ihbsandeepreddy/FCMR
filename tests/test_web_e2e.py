@@ -57,6 +57,19 @@ def test_nonterminal_run_detail_renders_200(client, status):
     assert r.status_code == 200, r.text[:500]
 
 
+def test_bad_login_shows_inline_error_not_raw_401(client):
+    """B6: invalid credentials re-render login.html with an inline error (401)."""
+    r = client.post(
+        "/login",
+        data={"username": "admin", "password": "wrong-password"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 401
+    assert "Invalid username or password" in r.text
+    # Must be the rendered HTML login page, not a bare JSON 401.
+    assert "<form" in r.text and "SanGir Automations" in r.text
+
+
 def test_unknown_ids_return_404_not_500(client):
     """Bad {id} routes must 404, never 500."""
     for path in [

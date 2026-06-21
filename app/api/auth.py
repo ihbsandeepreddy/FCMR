@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -45,21 +45,34 @@ async def login_form(request: Request):
     return templates.TemplateResponse(request=request, name="login.html")
 
 
+def _login_error(request: Request, message: str) -> HTMLResponse:
+    """Re-render the login page with an inline error (instead of a raw 401 page)."""
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"error": message},
+        status_code=401,
+    )
+
+
 @router.post("/login", response_class=HTMLResponse)
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Authenticate user and set session cookie."""
+    invalid_msg = "Invalid username or password."
     user = store.get_user(username)
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        return _login_error(request, invalid_msg)
 
     # Extract salt and hash
     pwd_parts = user["password_hash"].split(":")
     if len(pwd_parts) != 2:
-        raise HTTPException(status_code=500, detail="Invalid password format")
+        # Corrupt stored credential; do not leak details to the user.
+        logger.error("Stored password for user '%s' is malformed", username)
+        return _login_error(request, invalid_msg)
     salt, stored_hash = pwd_parts
 
     if not verify_password(password, stored_hash, salt):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        return _login_error(request, invalid_msg)
 
     # Create response and set session cookie
     response = RedirectResponse(url="/", status_code=303)
