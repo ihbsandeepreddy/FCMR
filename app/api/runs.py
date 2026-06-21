@@ -853,5 +853,32 @@ async def export_workpaper(run_id: str, dl_token: str | None = Query(None)):
         raise HTTPException(status_code=500, detail=f"Workpaper generation failed: {exc}") from exc
 
 
+@router.get("/runs/{run_id}/results.json")
+async def get_run_results_json(run_id: str):
+    """Get run results as JSON (read-only API)."""
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run["status"] != "completed" or not run["wide_csv"]:
+        raise HTTPException(status_code=400, detail="Run not completed yet")
+
+    wide_path = Path(run["wide_csv"])
+    if not wide_path.exists():
+        raise HTTPException(status_code=404, detail="Wide CSV not found")
+
+    # Get status counts and top exception codes
+    status_counts = aggregate_status_counts(wide_path)
+    exception_codes = aggregate_exception_codes(wide_path, top_n=10)
+
+    return {
+        "run_id": run_id,
+        "status": run["status"],
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "status_counts": status_counts,
+        "top_exception_codes": exception_codes,
+    }
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
