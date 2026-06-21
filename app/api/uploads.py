@@ -309,13 +309,25 @@ async def do_map_columns(request: Request, upload_id: str):
     # Form fields are named map_<canonical> = raw_header (canonical fields are the fixed left side)
     canonical_fields = get_canonical_fields(upload["report_type"])
     user_mapping: dict[str, str] = {}
+    raw_to_canonicals: dict[str, list[str]] = {}
     for spec in canonical_fields:
         raw_header = str(form.get(f"map_{spec.canonical}", "") or "").strip()
         if raw_header and raw_header != "__skip__":
             user_mapping[raw_header] = spec.canonical
+            raw_to_canonicals.setdefault(raw_header, []).append(spec.canonical)
+
+    # B4: reject ambiguous mappings where one source column is mapped to multiple
+    # canonical fields (the client hides taken options, but a crafted/JS-off POST
+    # could collide and silently drop a field).
+    conflicts = {rh: cs for rh, cs in raw_to_canonicals.items() if len(cs) > 1}
+    if conflicts:
+        detail = "; ".join(f"'{rh}' → {', '.join(cs)}" for rh, cs in conflicts.items())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Each source column may map to only one field. Conflicts: {detail}",
+        )
 
     raw_csv_path = upload["csv_path"] or ""
-    blob_downloaded = False
 
     # If csv_path is a blob URL, download it to /tmp for ingestion
     if raw_csv_path.startswith("http"):
@@ -329,7 +341,6 @@ async def do_map_columns(request: Request, upload_id: str):
                 with csv_path.open("wb") as f:
                     async for chunk in resp.aiter_bytes(65536):
                         f.write(chunk)
-        blob_downloaded = True
     else:
         csv_path = Path(raw_csv_path)
         if not csv_path.exists():
@@ -337,21 +348,30 @@ async def do_map_columns(request: Request, upload_id: str):
 
     try:
         result = ingest_csv(csv_path, upload["report_type"], upload_id, user_mapping=user_mapping)
+    except Exception as exc:
+        store.set_upload_failed(upload_id, error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
 
+    # B5: a header-only / empty file ingests with 0 rows; mark it failed instead of
+    # leaving a "ready" upload that silently produces no analytics.
+    if result.total_rows == 0:
+        store.set_upload_failed(
+            upload_id, error="The file contains no data rows (header-only or empty)."
+        )
+        csv_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file has no data rows. Upload a file with at least one record.",
+        )
+
+    try:
         # Import Parquet into DuckDB, then delete both Parquet and raw CSV from disk
         store.store_upload_data(upload_id, result.parquet_path)
-        if blob_downloaded:
-            csv_path.unlink(missing_ok=True)
-            try:
-                csv_path.parent.rmdir()
-            except Exception:
-                pass
-        else:
-            csv_path.unlink(missing_ok=True)
-            try:
-                csv_path.parent.rmdir()
-            except Exception:
-                pass
+        csv_path.unlink(missing_ok=True)
+        try:
+            csv_path.parent.rmdir()
+        except Exception:
+            pass
 
         store.set_upload_ready(
             upload_id,
