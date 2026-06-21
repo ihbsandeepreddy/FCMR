@@ -446,7 +446,7 @@ body {
 /* ── Forms ───────────────────────────────────────────────── */
 .form-group { margin-bottom: 18px; }
 .form-group label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
-.form-group select, .form-group input[type="text"] {
+.form-group select, .form-group input[type="text"], .form-group input[type="date"], .form-group input[type="number"], .form-group input[type="email"], .form-group input[type="password"] {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
