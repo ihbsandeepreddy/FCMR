@@ -135,6 +135,7 @@ def init_catalog() -> None:
             ("is_consolidated", "INTEGER DEFAULT 0"),
             ("source_count", "INTEGER"),
             ("source_files_json", "TEXT"),
+            ("error", "TEXT"),
         ]:
             try:
                 con.execute(f"ALTER TABLE uploads ADD COLUMN {col} {dtype}")
@@ -363,8 +364,8 @@ def drop_upload_data(upload_id: str) -> None:
 def set_upload_failed(upload_id: str, *, error: str) -> None:
     with _conn() as con:
         con.execute(
-            "UPDATE uploads SET status='failed' WHERE upload_id=?",
-            [upload_id],
+            "UPDATE uploads SET status='failed', error=? WHERE upload_id=?",
+            [error, upload_id],
         )
 
 

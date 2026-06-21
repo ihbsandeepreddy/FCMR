@@ -148,7 +148,11 @@
         {% endif %}
 
       {% elif upload.status == "failed" %}
-        <p class="error-text" style="font-size:13px;">Ingestion failed. Please re-upload the file.</p>
+        <div class="notice notice-err" style="margin-top:6px;">
+          <strong>Ingestion failed.</strong>
+          {% if upload.error %}<div class="mono" style="margin-top:6px; font-size:12px;">{{ upload.error }}</div>{% endif %}
+          <div style="margin-top:6px; font-size:13px;">Please fix the file and upload again.</div>
+        </div>
       {% endif %}
     </div>
   </div>

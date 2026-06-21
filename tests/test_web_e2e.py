@@ -110,7 +110,13 @@ def test_empty_csv_upload_marked_failed(client):
         follow_redirects=False,
     )
     assert r.status_code == 400, r.text[:300]
-    assert store.get_upload(upload_id)["status"] == "failed"
+    upload = store.get_upload(upload_id)
+    assert upload["status"] == "failed"
+    # B7: the failure reason is persisted and surfaced on the detail page.
+    assert upload.get("error")
+    detail = client.get(f"/dashboard/uploads/{upload_id}")
+    assert detail.status_code == 200
+    assert "Ingestion failed" in detail.text
 
 
 def test_unknown_ids_return_404_not_500(client):
