@@ -83,6 +83,24 @@
         Settings
       </a>
 
+      <a href="/audit" class="nav-item {% if request.url.path == '/audit' %}active{% endif %}">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <rect x="2" y="1.5" width="12" height="13" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none" opacity=".6"/>
+          <path d="M4.5 5h7M4.5 8h7M4.5 11h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        Audit Log
+      </a>
+
+      {% if request.session.get("role") == 'admin' %}
+      <a href="/users" class="nav-item {% if request.url.path == '/users' %}active{% endif %}">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="5.5" r="2.6" stroke="currentColor" stroke-width="1.3" fill="none" opacity=".7"/>
+          <path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/>
+        </svg>
+        Users
+      </a>
+      {% endif %}
+
     </nav>
 
     <div style="padding: 12px 15px; margin-top: auto; border-top: 1px solid var(--border);">

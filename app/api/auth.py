@@ -78,6 +78,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
     response = RedirectResponse(url="/", status_code=303)
     request.session["username"] = username
     request.session["display_name"] = user["display_name"]
+    request.session["role"] = user.get("role", "admin")
 
     # Log login event
     store.log_audit_event(action="login", username=username)
