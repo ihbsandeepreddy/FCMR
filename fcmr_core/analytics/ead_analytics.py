@@ -12,6 +12,17 @@ from pathlib import Path
 
 import polars as pl
 
+from fcmr_core.analytics.ead_summary import (
+    generate_collateral_coverage,
+    generate_data_quality_summary_ead,
+    generate_dpd_risk_distribution,
+    generate_portfolio_concentration,
+    generate_provision_coverage,
+    generate_sanction_disbursement_variance,
+    generate_stage_distribution,
+    generate_writeoff_recovery,
+)
+
 # ---------------------------------------------------------------------------
 # Column maps
 # ---------------------------------------------------------------------------
@@ -673,6 +684,15 @@ _REPORT_SHEET_NAMES: list[tuple[str, str]] = [
     ("negative_check", "Negative Values"),
     ("stage_mismatch", "Stage Mismatch"),
     ("fvtpl", "FVTPL Split"),
+    # EAD Summary Reports (8 audit-focused summaries)
+    ("portfolio_concentration", "Portfolio Concentration"),
+    ("stage_distribution", "Stage Distribution"),
+    ("dpd_risk_distribution", "DPD/Risk Distribution"),
+    ("collateral_coverage", "Collateral Coverage"),
+    ("provision_coverage", "Provision Coverage"),
+    ("writeoff_recovery", "Write-off & Recovery"),
+    ("sanction_disbursement", "Sanction vs Disbursement"),
+    ("data_quality_ead", "Data Quality Summary"),
 ]
 
 
@@ -811,8 +831,33 @@ def run_ead_analytics(
             # One report failure must not abort the whole suite
             reports[key] = pl.DataFrame({"error": [str(exc)]})
 
+    # Compute 8 EAD summary reports
+    summary_reports = [
+        (
+            "portfolio_concentration",
+            generate_portfolio_concentration(df),
+            "Portfolio Concentration",
+        ),
+        ("stage_distribution", generate_stage_distribution(df), "Stage Distribution"),
+        ("dpd_risk_distribution", generate_dpd_risk_distribution(df), "DPD/Risk Distribution"),
+        ("collateral_coverage", generate_collateral_coverage(df), "Collateral Coverage"),
+        ("provision_coverage", generate_provision_coverage(df), "Provision Coverage"),
+        ("writeoff_recovery", generate_writeoff_recovery(df), "Write-off & Recovery"),
+        (
+            "sanction_disbursement",
+            generate_sanction_disbursement_variance(df),
+            "Sanction vs Disbursement",
+        ),
+        ("data_quality_ead", generate_data_quality_summary_ead(df), "Data Quality Summary"),
+    ]
+    for key, result, label in summary_reports:
+        if result and not result.is_empty() and "note" not in result.columns:
+            reports[key] = result
+            if on_progress:
+                on_progress(total, total, f"Summary: {label}")
+
     if on_progress:
-        on_progress(total - 1, total, "Building Excel workpaper")
+        on_progress(total, total, "Building Excel workpaper")
 
     workpaper_path = output_dir / "ead_workpaper.xlsx"
     try:
