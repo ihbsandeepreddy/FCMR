@@ -160,6 +160,25 @@
     </p>
   </div>
 
+  <div class="card" style="border-left:4px solid var(--warn-text); background:var(--row-alt);">
+    <div class="card-title">Quit Application</div>
+    <div class="card-sub">Stop the backend server and close the application</div>
+
+    <button id="quit-btn" onclick="quitApplication()" class="btn btn-ghost" style="margin-top:12px;">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+        <path d="M2 8L14 8M8 2L14 8L8 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Quit Application
+    </button>
+    <p class="help-text" style="margin-top:8px; font-size:12.5px;">
+      Gracefully stops the backend server and releases all memory.
+      You can close this window after the server stops.
+    </p>
+    <div id="quit-notice" style="display:none; margin-top:12px;" class="notice">
+      Server stopped. You can now close this window.
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -291,6 +310,32 @@
   window.addEventListener('beforeunload', () => {
     if (monitorInterval) clearInterval(monitorInterval);
   });
+
+  // Quit application
+  window.quitApplication = async function() {
+    if (!confirm('Are you sure you want to quit the application?\n\nThis will stop the backend server and close this window.')) {
+      return;
+    }
+    const btn = document.getElementById('quit-btn');
+    const notice = document.getElementById('quit-notice');
+    try {
+      btn.disabled = true;
+      btn.textContent = 'Quitting…';
+      const res = await fetch('/api/system/shutdown', { method: 'POST' });
+      if (res.ok) {
+        notice.style.display = 'block';
+        btn.textContent = 'Application Quit';
+      } else {
+        btn.textContent = 'Quit Application';
+        btn.disabled = false;
+        alert('Failed to quit: ' + (res.statusText || 'unknown error'));
+      }
+    } catch (e) {
+      btn.textContent = 'Quit Application';
+      btn.disabled = false;
+      alert('Error: ' + e.message);
+    }
+  };
 </script>
 
 {% endblock %}

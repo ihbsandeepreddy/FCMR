@@ -163,7 +163,12 @@ async def run_status(run_id: str):
 def _build_workpaper_background(run_id: str, upload: dict) -> None:
     """Pre-generate workpaper after analytics completes (best-effort background task)."""
     run = store.get_run(run_id)
-    if not run or run["status"] != "completed" or not run.get("wide_csv") or not run.get("long_csv"):
+    if (
+        not run
+        or run["status"] != "completed"
+        or not run.get("wide_csv")
+        or not run.get("long_csv")
+    ):
         return
 
     engagement_id = run.get("engagement_id") or "default"

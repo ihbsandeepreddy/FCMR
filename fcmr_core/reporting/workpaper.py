@@ -59,9 +59,7 @@ def _procedures_performed(run: dict, long_csv_path: Path) -> list[dict]:
 
             # Severity per rule: collect unique codes per rule, map to severity
             rule_codes_agg = (
-                long_df.group_by("rule_id")
-                .agg(pl.col("exception_code").unique())
-                .to_dicts()
+                long_df.group_by("rule_id").agg(pl.col("exception_code").unique()).to_dicts()
             )
             severity_map = {}
             sev_order = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "LOW": 0}

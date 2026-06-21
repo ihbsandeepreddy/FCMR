@@ -225,9 +225,15 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  if (backendProcess) {
+  if (backendProcess && backendProcess.pid) {
     writeLog("Terminating backend…");
-    backendProcess.kill();
+    if (process.platform === "win32") {
+      try {
+        require("child_process").execSync(`taskkill /F /T /PID ${backendProcess.pid}`, { stdio: "ignore" });
+      } catch (_) {}
+    } else {
+      backendProcess.kill();
+    }
   }
 });
 

@@ -6,7 +6,7 @@
 > When code and this document disagree, treat it as a bug in one of them and reconcile
 > immediately (update the code or update this doc in the same change).
 >
-> **Last reconciled with code:** 2026-06-20 (v0.1.30 bugfix + hardening pass).
+> **Last reconciled with code:** 2026-06-21 (v0.1.31 process-lifecycle fix + workpaper speedup).
 > Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
 
 ---
@@ -87,6 +87,23 @@ and the `VERCEL` env var. Three environments:
 > ⚠️ **Data survival (invariant #4) only holds on dev and desktop.** On Vercel the catalog is
 > a throwaway. The desktop build is the primary durable deployment path — it uses per-user
 > appdata so no admin rights are needed.
+
+### Process lifecycle & cleanup
+
+**All three run paths guarantee clean shutdown and memory release on close:**
+
+- **Dev (`start.bat`):** drops `--reload` (single uvicorn process). Closing the terminal cleanly
+  terminates it; no orphaned worker.
+- **Desktop (Electron):** uses Windows **tree-kill** (`taskkill /F /T`) on quit, so any spawned
+  child (helper, worker) is reaped, not just the direct child. `signal.SIGTERM` handlers call
+  `store.close_catalog()` to release the DuckDB lock before exit.
+- **Browser (dev server):** users click **Settings → Quit Application**, which calls
+  `POST /api/system/shutdown` (login-gated). Handler returns to browser, then a daemon thread
+  sleeps 0.5 s (so response flushes), calls `store.close_catalog()`, then `os._exit(0)` for
+  forced process termination (OS reclaims all memory). Works in all run modes.
+
+The backend's DuckDB `memory_limit=6GB` (mid-tier) allocates aggressively but is released
+completely on process exit, not on logout or page close.
 
 ---
 
@@ -654,6 +671,7 @@ server-rendered.
 | **DuckDB memory limits on every analytics connection** (v0.1.30) | Prevents OOM on large files; enables graceful disk spill on constrained systems | Apply limits immediately after `duckdb.connect()` in all analytics paths |
 | **Catalog connection closed on shutdown** (v0.1.30) | Graceful release of DuckDB single-writer lock; allows Electron to reap orphaned processes | Call `store.close_catalog()` in lifespan shutdown + signal handlers on desktop |
 | **Catalog connect is bounded/fails-fast** (v0.1.31) | `duckdb.connect()` is wrapped with a ~15s timeout + retry; fails fast with a logged error instead of hanging indefinitely when the catalog is locked | Always log lock errors clearly; desktop backend self-heals via orphan reap + retry on lock |
+| **Process lifecycle: clean exit on close** (v0.1.31) | `start.bat` drops `--reload` (single process); Electron uses tree-kill on Windows; browser users get "Quit" button at `/settings` → `POST /api/system/shutdown`. Ensures backend cleanup, memory release, catalog lock release on all close paths | Single durable process model (no orphans); graceful shutdown via `store.close_catalog()` then `os._exit(0)` |
 
 ---
 
