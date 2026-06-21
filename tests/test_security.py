@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from fcmr_core.catalog import store
 from fcmr_core.security import hash_password, verify_password
 
 
@@ -44,3 +45,10 @@ def test_different_salts_produce_different_hashes():
     # Hashes should be different (different salts)
     assert hash1 != hash2, "Different salts should produce different hashes"
     assert salt1 != salt2, "Generated salts should be unique"
+
+
+def test_store_update_password_exists():
+    """Verify store.update_password helper exists and is callable."""
+    # Simple check that the function exists and is callable
+    assert hasattr(store, "update_password"), "store should have update_password helper"
+    assert callable(store.update_password), "update_password should be callable"

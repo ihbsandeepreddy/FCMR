@@ -533,6 +533,15 @@ def get_user(username: str) -> dict | None:
     return dict(zip(cols, rows[0]))
 
 
+def update_password(username: str, password_hash: str) -> None:
+    """Update user password hash. Hash should be in 'salt:hash' format."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET password_hash=? WHERE username=?",
+            [password_hash, username],
+        )
+
+
 # ---------------------------------------------------------------------------
 # Engagement CRUD
 # ---------------------------------------------------------------------------
