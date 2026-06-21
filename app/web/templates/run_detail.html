@@ -5,7 +5,13 @@
 {% block head %}{% endblock %}
 
 {% block topbar_actions %}
-  <a href="/dashboard" class="btn btn-ghost" style="margin-left:auto;">← Dashboard</a>
+  <button onclick="window.print()" class="btn btn-ghost" title="Print or export as PDF">
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2">
+      <path d="M2 6V3h12v3M2 13h12v-6H2v6M4 2V1M12 2V1"/>
+    </svg>
+    Print / PDF
+  </button>
+  <a href="/dashboard" class="btn btn-ghost">← Dashboard</a>
 {% endblock %}
 
 {% block content %}
