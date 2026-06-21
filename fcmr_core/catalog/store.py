@@ -214,6 +214,18 @@ def init_catalog() -> None:
             )
         """)
 
+        # Audit log for lifecycle events
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                event_id    TEXT PRIMARY KEY,
+                ts          TEXT NOT NULL,
+                username    TEXT,
+                action      TEXT NOT NULL,
+                target      TEXT,
+                detail      TEXT
+            )
+        """)
+
         # Create a default engagement for existing uploads
         try:
             con.execute(
