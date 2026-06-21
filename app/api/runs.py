@@ -125,6 +125,10 @@ async def runs_list(request: Request):
     ready_uploads = [u for u in all_uploads if u["status"] == "ready"]
     categories = list_categories()
     disabled_rules = store.get_disabled_rules(engagement_id) if engagement_id else []
+    # Forensic analytics from catalogue
+    forensic_analytics = [
+        {"key": k, "title": t, "catalogue_id": c} for k, t, c, _ in CATALOGUE_ANALYTICS
+    ]
     return templates.TemplateResponse(
         request=request,
         name="runs_list.html",
@@ -134,6 +138,7 @@ async def runs_list(request: Request):
             "ready_uploads": ready_uploads,
             "categories": categories,
             "disabled_rules": disabled_rules,
+            "forensic_analytics": forensic_analytics,
         },
     )
 
@@ -146,6 +151,7 @@ async def runs_start(
     mode: str = Form("all"),
     categories: list[str] | None = Form(None),
     rules: list[str] | None = Form(None),
+    forensic_analytics: list[str] | None = Form(None),
 ):
     upload = store.get_upload(upload_id)
     if not upload:
@@ -178,6 +184,10 @@ async def runs_start(
         detail=f"upload_id={upload_id}",
         username=username,
     )
+
+    # Store selected forensic analytics for this run (for CM runs only)
+    if forensic_analytics:
+        store.update_run(run_id, selected_forensic_analytics=json.dumps(forensic_analytics))
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
@@ -737,7 +747,17 @@ async def run_detail(request: Request, run_id: str):
                                     "columns": bank_anomalies.columns,
                                 }
                         # Catalogue-grounded forensic analytics (CM-DQ-06/07/09/10, CM-ID-01/03/04)
+                        # Only compute selected forensic analytics
+                        selected_forensic = []
+                        selected_forensic_json = run.get("selected_forensic_analytics")
+                        if selected_forensic_json:
+                            selected_forensic = json.loads(selected_forensic_json)
+
                         for key, title, cid, fn in CATALOGUE_ANALYTICS:
+                            # Skip if user didn't select this forensic analytic
+                            if selected_forensic and key not in selected_forensic:
+                                continue
+
                             try:
                                 res = fn(df)
                             except Exception:

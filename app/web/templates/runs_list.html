@@ -45,6 +45,22 @@
       {% endfor %}
     </div>
 
+    {# Forensic Analytics (Catalogue-grounded) #}
+    {% if forensic_analytics %}
+    <div style="padding:16px; background:var(--bg); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; margin-top:12px;">
+      <div style="font-weight:500; margin-bottom:12px; font-size:13.5px;">Forensic Analytics <span style="font-weight:400; color:var(--muted);">(optional, for CM only)</span></div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        {% for fa in forensic_analytics %}
+        <label style="display:flex; align-items:center; cursor:pointer; font-size:12.5px; gap:8px; color:var(--fg);">
+          <input type="checkbox" name="forensic_analytics" value="{{ fa.key }}" class="forensic_checkbox">
+          <span class="mono" style="font-size:11px; background:var(--bg-alt); padding:2px 6px; border-radius:4px;">{{ fa.catalogue_id }}</span>
+          {{ fa.title }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
       <button type="submit" name="mode" value="all" class="btn btn-run" id="run_all_btn" data-loading-text="Starting…">
         <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
