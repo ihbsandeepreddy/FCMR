@@ -590,6 +590,79 @@ def set_disabled_rules(engagement_id: str, rule_ids: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Audit Log
+# ---------------------------------------------------------------------------
+
+
+def log_audit_event(
+    action: str,
+    target: str | None = None,
+    detail: str | None = None,
+    username: str | None = None,
+) -> str:
+    """Log an audit event.
+
+    Args:
+        action: Action performed (e.g., 'run_started', 'login', 'logout')
+        target: Target of the action (e.g., run_id, engagement_id)
+        detail: Optional detail text (avoid PII)
+        username: Username (if None, not recorded)
+
+    Returns:
+        event_id (UUID-like string)
+    """
+    import uuid
+
+    event_id = str(uuid.uuid4())
+    ts = _now()
+
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO audit_log (event_id, ts, username, action, target, detail)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [event_id, ts, username, action, target, detail],
+        )
+
+    return event_id
+
+
+def list_audit_events(limit: int = 100, offset: int = 0) -> list[dict]:
+    """List recent audit events.
+
+    Args:
+        limit: Max events to return (default 100)
+        offset: Offset for pagination (default 0)
+
+    Returns:
+        List of audit event dicts, most recent first.
+    """
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT event_id, ts, username, action, target, detail
+            FROM audit_log
+            ORDER BY ts DESC
+            LIMIT ? OFFSET ?
+            """,
+            [limit, offset],
+        ).fetchall()
+
+    return [
+        {
+            "event_id": row[0],
+            "ts": row[1],
+            "username": row[2],
+            "action": row[3],
+            "target": row[4],
+            "detail": row[5],
+        }
+        for row in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Engagement CRUD
 # ---------------------------------------------------------------------------
 
