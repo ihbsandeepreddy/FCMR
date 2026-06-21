@@ -27,6 +27,7 @@ from fcmr_core.analytics.cm_summary import (
 from fcmr_core.catalog import store
 from fcmr_core.logging_setup import get_logger
 from fcmr_core.reporting.excel_style import (
+    COUNT_FORMAT,
     HEADER_FILL,
     HEADER_FONT,
     PERCENT_FORMAT,
@@ -132,7 +133,7 @@ def build_workpaper(
     sample_records: list[dict],
     output_dir: Path,
 ) -> Path:
-    """Build a 13-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology, + 8 CM Summaries).
+    """Build a 14-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology, Data Quality, + 8 CM Summaries).
 
     Args:
         engagement: Engagement dict from store.
@@ -212,7 +213,11 @@ def build_workpaper(
         ws4, engagement, run, wide_csv_path, sample_records, title_font, subheader_font
     )
 
-    # ── Sheets 5-12: CM Summary Reports (if customer_master) ──
+    # ── Sheet 5: Data Quality ──
+    ws5 = wb.create_sheet("Data Quality")
+    _build_data_quality_sheet(ws5, wide_csv_path, header_fill, header_font, border)
+
+    # ── Sheets 6-13: CM Summary Reports (if customer_master) ──
     if upload and upload.get("report_type") == "customer_master":
         try:
             df = store.get_upload_df(upload["upload_id"])
@@ -692,6 +697,71 @@ def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
     # Adjust column widths
     for col_idx, width in enumerate([8, 10, 12, 28, 28, 14, 22, 15, 12, 12, 16], 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+def _build_data_quality_sheet(ws, wide_csv_path, header_fill, header_font, border):
+    """Build Data Quality sheet showing field-level completeness."""
+    try:
+        df = pl.read_csv(wide_csv_path, infer_schema_length=0)
+        total_rows = len(df)
+
+        if total_rows == 0:
+            ws["A1"] = "No data available"
+            return
+
+        # Headers
+        headers = ["Field", "Present", "Missing", "% Missing"]
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+
+        # Data rows: analyze each column
+        data_rows = []
+        for col_name in df.columns:
+            # Skip internal/exception columns
+            if col_name.startswith("_exc_") or col_name.startswith("exception_"):
+                continue
+            if col_name in [
+                "overall_status",
+                "exception_count",
+                "exception_codes",
+                "exception_descriptions",
+            ]:
+                continue
+
+            # Count non-null values
+            present = df.select(pl.col(col_name)).filter(pl.col(col_name).is_not_null()).height
+            missing = total_rows - present
+            pct_missing = (missing / total_rows * 100) if total_rows > 0 else 0
+
+            data_rows.append(
+                {
+                    "field": col_name,
+                    "present": present,
+                    "missing": missing,
+                    "pct_missing": pct_missing / 100,  # Store as decimal for formatting
+                }
+            )
+
+        # Sort by % missing (descending, worst first)
+        data_rows.sort(key=lambda x: x["pct_missing"], reverse=True)
+
+        # Write data rows
+        for row_idx, row_data in enumerate(data_rows, 2):
+            ws.cell(row=row_idx, column=1, value=row_data["field"])
+            ws.cell(row=row_idx, column=2, value=row_data["present"]).number_format = COUNT_FORMAT
+            ws.cell(row=row_idx, column=3, value=row_data["missing"]).number_format = COUNT_FORMAT
+            ws.cell(row=row_idx, column=4, value=row_data["pct_missing"]).number_format = (
+                PERCENT_FORMAT
+            )
+
+        # Freeze header and auto-size
+        freeze_header(ws)
+        auto_column_widths(ws, max_width=20)
+
+    except Exception:
+        ws["A1"] = "Unable to load data quality metrics"
 
 
 def _get_selected_category_ids(run: dict) -> set[str]:
