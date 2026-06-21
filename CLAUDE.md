@@ -6,8 +6,17 @@
 > When code and this document disagree, treat it as a bug in one of them and reconcile
 > immediately (update the code or update this doc in the same change).
 >
-> **Last reconciled with code:** 2026-06-21 (v0.1.31 process-lifecycle fix + workpaper speedup).
+> **Last reconciled with code:** 2026-06-21 (v0.1.38 production-hardening pass — see below).
 > Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
+>
+> **v0.1.38 hardening (this pass):** fixed UCID-vs-duplicate ordering (same-UCID/distinct-LAN
+> scoping now works); run-detail no longer 500s on non-completed runs; Aadhaar masked in the
+> wide CSV; deterministic beneficiary keys; calendar-correct age; per-engagement disabled-rules
+> wired end-to-end; EAD summary reports + EAD workpaper build restored; login inline errors;
+> column-map/empty-CSV validation; persisted upload errors; engagement guards; `FCMR_DATA_DIR`
+> honored; `tests/test_imports.py` now exists; suite expanded (golden/EAD-baseline/web-e2e/
+> robustness/sampling). Remaining roadmap (performance for 10M rows, bolder UI refresh, the
+> two-engine audit-deliverable upgrade) is tracked in `HANDOFF.md`.
 
 ---
 
