@@ -160,3 +160,55 @@ def generate_fraud_risk_flags(df: pl.DataFrame) -> pl.DataFrame:
         return pl.DataFrame({"note": ["No fraud-risk flags detected"]})
 
     return pl.DataFrame(flags)
+
+
+def generate_coapplicant_concentration(df: pl.DataFrame) -> pl.DataFrame:
+    """Co-applicant concentration: identify shared co-applicants across primaries.
+
+    Detects:
+    - Co-applicants appearing across multiple primary applicants (related-party risk)
+    - Concentration of co-applicant relationships (single person backing many loans)
+
+    Returns DataFrame with co_applicant_mobile, primary_count, loan_count.
+    """
+    if "coapplicant_mobile" not in df.columns:
+        return pl.DataFrame({"note": ["coapplicant_mobile column required"]})
+
+    # Filter to rows with non-null co-applicant mobile
+    coapplicant_rows = df.filter(
+        (pl.col("coapplicant_mobile").is_not_null())
+        & (pl.col("coapplicant_mobile").cast(pl.Utf8, strict=False).str.len_chars() > 0)
+    )
+
+    if len(coapplicant_rows) == 0:
+        return pl.DataFrame({"note": ["No co-applicant data found"]})
+
+    # Aggregate: per coapplicant_mobile, count distinct primary customers + distinct loans
+    concentration = (
+        coapplicant_rows.group_by("coapplicant_mobile")
+        .agg(
+            [
+                pl.col("customer_id").n_unique().alias("Primary_Applicants"),
+                pl.col("lan").n_unique().alias("Loan_Count"),
+            ]
+        )
+        .filter(pl.col("Primary_Applicants") > 1)  # Only co-applicants linked to 2+ primaries
+        .sort("Loan_Count", descending=True)
+    )
+
+    if len(concentration) == 0:
+        return pl.DataFrame({"note": ["No concentrated co-applicant relationships"]})
+
+    # Remove the masked coapplicant_mobile from output (privacy); show counts only
+    return concentration.select(
+        [
+            pl.lit("Multiple Primary Links").alias("Concentration Type"),
+            pl.col("Primary_Applicants"),
+            pl.col("Loan_Count"),
+        ]
+    ).with_columns(
+        [
+            pl.col("Primary_Applicants").cast(pl.Int64),
+            pl.col("Loan_Count").cast(pl.Int64),
+        ]
+    )

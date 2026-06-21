@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import polars as pl
 
-from fcmr_core.analytics.cm_analytics import generate_aadhaar_coverage, generate_fraud_risk_flags
+from fcmr_core.analytics.cm_analytics import (
+    generate_aadhaar_coverage,
+    generate_coapplicant_concentration,
+    generate_fraud_risk_flags,
+)
 
 
 def test_aadhaar_coverage_basic():
@@ -128,3 +132,53 @@ def test_fraud_risk_flags_no_column():
 
     assert "note" in result.columns
     assert result[0, "note"] == "customer_id column required"
+
+
+def test_coapplicant_concentration_basic():
+    """Test detection of co-applicants linked to multiple primaries."""
+    df = pl.DataFrame(
+        {
+            "customer_id": ["C001", "C002", "C003"],
+            "coapplicant_mobile": ["9876543210", "9876543210", "9999999999"],
+            "lan": ["L001", "L002", "L003"],
+        }
+    )
+
+    result = generate_coapplicant_concentration(df)
+
+    assert "Primary_Applicants" in result.columns
+    assert "Loan_Count" in result.columns
+    # Co-applicant 9876543210 linked to 2 primaries
+    assert len(result) > 0
+    assert result[0, "Primary_Applicants"] == 2
+
+
+def test_coapplicant_concentration_no_shared():
+    """Test when no co-applicant is shared across primaries."""
+    df = pl.DataFrame(
+        {
+            "customer_id": ["C001", "C002"],
+            "coapplicant_mobile": ["9876543210", "8765432109"],
+            "lan": ["L001", "L002"],
+        }
+    )
+
+    result = generate_coapplicant_concentration(df)
+
+    assert "note" in result.columns
+    assert result[0, "note"] == "No concentrated co-applicant relationships"
+
+
+def test_coapplicant_concentration_no_column():
+    """Test when coapplicant_mobile column is missing."""
+    df = pl.DataFrame(
+        {
+            "customer_id": ["C001", "C002"],
+            "lan": ["L001", "L002"],
+        }
+    )
+
+    result = generate_coapplicant_concentration(df)
+
+    assert "note" in result.columns
+    assert result[0, "note"] == "coapplicant_mobile column required"
