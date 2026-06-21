@@ -13,6 +13,12 @@ from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from fcmr_core.analytics.cm_analytics import (
+    generate_aadhaar_coverage,
+    generate_bank_account_anomalies,
+    generate_coapplicant_concentration,
+    generate_fraud_risk_flags,
+)
 from fcmr_core.analytics.cm_summary import (
     generate_cluster_distribution,
     generate_coapplicant_overlap,
@@ -489,6 +495,54 @@ async def run_detail(request: Request, run_id: str):
                                 "title": "LAN Concentration (Top 10)",
                                 "data": lan.to_dicts(),
                                 "columns": lan.columns,
+                            }
+                        # B4.1: Aadhaar coverage
+                        aadhaar_cov = generate_aadhaar_coverage(df)
+                        if (
+                            aadhaar_cov
+                            and not aadhaar_cov.is_empty()
+                            and "note" not in aadhaar_cov.columns
+                        ):
+                            cm_summaries["aadhaar_coverage"] = {
+                                "title": "Aadhaar Coverage",
+                                "data": aadhaar_cov.to_dicts(),
+                                "columns": aadhaar_cov.columns,
+                            }
+                        # B4.2: Fraud-risk flags
+                        fraud_flags = generate_fraud_risk_flags(df)
+                        if (
+                            fraud_flags
+                            and not fraud_flags.is_empty()
+                            and "note" not in fraud_flags.columns
+                        ):
+                            cm_summaries["fraud_risk_flags"] = {
+                                "title": "Fraud-Risk Flags",
+                                "data": fraud_flags.to_dicts(),
+                                "columns": fraud_flags.columns,
+                            }
+                        # B4.3: Co-applicant concentration
+                        coapp_conc = generate_coapplicant_concentration(df)
+                        if (
+                            coapp_conc
+                            and not coapp_conc.is_empty()
+                            and "note" not in coapp_conc.columns
+                        ):
+                            cm_summaries["coapplicant_concentration"] = {
+                                "title": "Co-Applicant Concentration",
+                                "data": coapp_conc.to_dicts(),
+                                "columns": coapp_conc.columns,
+                            }
+                        # B4.4: Bank account anomalies
+                        bank_anomalies = generate_bank_account_anomalies(df)
+                        if (
+                            bank_anomalies
+                            and not bank_anomalies.is_empty()
+                            and "note" not in bank_anomalies.columns
+                        ):
+                            cm_summaries["bank_account_anomalies"] = {
+                                "title": "Bank Account Anomalies",
+                                "data": bank_anomalies.to_dicts(),
+                                "columns": bank_anomalies.columns,
                             }
             except Exception:
                 cm_summaries = {}

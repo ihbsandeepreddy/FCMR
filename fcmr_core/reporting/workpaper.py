@@ -14,6 +14,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from fcmr_core.analytics.cm_analytics import (
+    generate_aadhaar_coverage,
+    generate_bank_account_anomalies,
+    generate_coapplicant_concentration,
+    generate_fraud_risk_flags,
+)
 from fcmr_core.analytics.cm_summary import (
     generate_cluster_distribution,
     generate_coapplicant_overlap,
@@ -133,7 +139,7 @@ def build_workpaper(
     sample_records: list[dict],
     output_dir: Path,
 ) -> Path:
-    """Build a 14-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology, Data Quality, + 8 CM Summaries).
+    """Build an 18-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology, Data Quality, + 8 CM Summaries, + 4 B4 Analytics).
 
     Args:
         engagement: Engagement dict from store.
@@ -218,11 +224,12 @@ def build_workpaper(
     _build_data_quality_sheet(ws5, wide_csv_path, header_fill, header_font, border)
 
     # ── Sheets 6-13: CM Summary Reports (if customer_master) ──
+    # ── Sheets 14-17: B4 Best-Practice Analytics (if customer_master) ──
     if upload and upload.get("report_type") == "customer_master":
         try:
             df = store.get_upload_df(upload["upload_id"])
             if df is not None and not df.is_empty():
-                # All 8 summaries
+                # All 8 summaries (sheets 6-13)
                 summaries = [
                     ("Geographic Distribution", generate_geographic_distribution(df)),
                     ("KYC Completeness", generate_kyc_completeness(df)),
@@ -242,6 +249,24 @@ def build_workpaper(
                         ws = wb.create_sheet(title)
                         _write_summary_sheet(
                             ws, title, summary_df, header_fill, header_font, border
+                        )
+
+                # B4 Best-Practice Analytics (sheets 14-17)
+                b4_analytics = [
+                    ("Aadhaar Coverage", generate_aadhaar_coverage(df)),
+                    ("Fraud-Risk Flags", generate_fraud_risk_flags(df)),
+                    ("Co-Applicant Concentration", generate_coapplicant_concentration(df)),
+                    ("Bank Account Anomalies", generate_bank_account_anomalies(df)),
+                ]
+                for title, analytics_df in b4_analytics:
+                    if (
+                        analytics_df
+                        and not analytics_df.is_empty()
+                        and "note" not in analytics_df.columns
+                    ):
+                        ws = wb.create_sheet(title)
+                        _write_summary_sheet(
+                            ws, title, analytics_df, header_fill, header_font, border
                         )
         except Exception:
             pass  # Silently skip summaries if there's an error
