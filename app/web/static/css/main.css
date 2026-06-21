@@ -10,9 +10,11 @@
   --border:       oklch(89.5% 0.018 72);
   --border-light: oklch(93.5% 0.01 72);
   --row-alt:      oklch(97.8% 0.008 72);
+  --bg-alt:       oklch(97.8% 0.008 72); /* alias of --row-alt (used by templates) */
 
   /* Text */
   --text:         oklch(20% 0.025 70);
+  --fg:           oklch(20% 0.025 70); /* alias of --text (used by templates) */
   --text-sub:     oklch(32% 0.022 70);
   --muted:        oklch(52% 0.02 70);
   --faint:        oklch(62% 0.015 70);
@@ -320,9 +322,13 @@ body {
 .badge-running        { background: var(--blue-bg);  color: var(--blue-text); }
 .badge-completed      { background: var(--ok-bg);   color: var(--ok-text); }
 .badge-failed         { background: var(--err-bg);  color: var(--err-text); }
+.badge-cancelled      { background: var(--row-alt); color: var(--faint); }
 .badge-OK             { background: var(--ok-bg);   color: var(--ok-text); }
 .badge-WARN           { background: var(--warn-bg); color: var(--warn-text); }
 .badge-ERROR          { background: var(--err-bg);  color: var(--err-text); }
+.badge-success        { background: var(--ok-bg);   color: var(--ok-text); }
+.badge-info           { background: var(--blue-bg); color: var(--blue-text); }
+.badge-warning        { background: var(--warn-bg); color: var(--warn-text); }
 .badge-cat-kyc    { background: oklch(95% 0.04 40);  color: oklch(40% 0.16 40); }
 .badge-cat-addr   { background: var(--blue-bg);       color: var(--blue-text); }
 .badge-cat-dup    { background: var(--warn-bg);        color: var(--warn-text); }
