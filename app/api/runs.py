@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from fcmr_core.analytics.cm_summary import generate_geographic_distribution
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import read_parquet
@@ -342,6 +343,7 @@ async def run_detail(request: Request, run_id: str):
     summary = None
     ran_categories = None
     missing_summary = None
+    geographic_distribution = None
     rules_run = []
     sibling_runs = []
 
@@ -409,6 +411,21 @@ async def run_detail(request: Request, run_id: str):
                 if long_path.exists():
                     missing_summary = aggregate_missing_data(long_path, total)
 
+            # Compute geographic distribution summary (for CM runs)
+            try:
+                upload = store.get_upload(run["upload_id"])
+                if upload and upload.get("report_type") == "customer_master":
+                    df = store.get_upload_df(run["upload_id"])
+                    if df is not None and not df.is_empty():
+                        geo_dist = generate_geographic_distribution(df)
+                        if geo_dist and not geo_dist.is_empty() and "note" not in geo_dist.columns:
+                            geographic_distribution = {
+                                "data": geo_dist.to_dicts(),
+                                "columns": geo_dist.columns,
+                            }
+            except Exception:
+                geographic_distribution = None
+
     return templates.TemplateResponse(
         request=request,
         name="run_detail.html",
@@ -419,6 +436,7 @@ async def run_detail(request: Request, run_id: str):
             "bar_svg": bar_svg,
             "ran_categories": ran_categories,
             "missing_summary": missing_summary,
+            "geographic_distribution": geographic_distribution,
             "rules_run": rules_run,
             "sibling_runs": sibling_runs,
         },
