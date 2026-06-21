@@ -652,11 +652,12 @@ def generate_sbu_summary(df: pl.DataFrame) -> pl.DataFrame:
         agg = [pl.len().alias("Loan Count")]
 
     rename = {"sbu": "SBU", "sub_sbu": "Sub-SBU"}
+    sort_col = rename.get(group_cols[0], group_cols[0])
     return (
         df.group_by(group_cols)
         .agg(agg)
         .rename({k: v for k, v in rename.items() if k in group_cols})
-        .sort(group_cols[0])
+        .sort(sort_col)
     )
 
 
@@ -865,7 +866,7 @@ _REPORT_FUNCTIONS: list[tuple[str, object, str]] = [
     ("dpd_summary",                 generate_dpd_summary,                  "DPD Bucket Summary"),
     ("security",                    generate_security_summary,             "Secured vs Unsecured"),
     ("writeoff",                    generate_writeoff_summary,             "Write-Off Summary"),
-    ("sbu",                         generate_sbu_summary,                  "SBU / SubSBU Breakdown"),
+    ("sbu",                         generate_sbu_summary,                  "SBU - SubSBU Breakdown"),
     ("provision_check",             generate_provision_check,              "Provision Reasonableness"),
     ("negative_check",              generate_negative_check,               "Negative Values Check"),
     ("stage_mismatch",              generate_stage_mismatch,               "Stage-DPD Mismatch"),

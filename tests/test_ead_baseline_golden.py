@@ -46,25 +46,38 @@ def _ead_frame() -> pl.DataFrame:
 
 
 # Locked baseline captured from the current EAD engine (frozen).
+# Re-baselined after v0.1.38 EAD expansion (new reports added; sbu sort bug fixed).
 EXPECTED: dict[str, dict] = {
-    "dpd_summary": {
+    "ucid_lan": {"columns": ["note"], "rows": 1},
+    "state_ead": {
+        "columns": ["State", "Loan Count", "Total EAD", "Total Provision", "Coverage %"],
+        "rows": 3,
+    },
+    "disbursement": {"columns": ["note"], "rows": 1},
+    "product_ead": {
         "columns": [
+            "Product ID",
+            "Product Name",
+            "Loan Count",
+            "Total EAD",
+            "Total Provision",
+            "Outstanding Principal",
+            "Coverage %",
+        ],
+        "rows": 3,
+    },
+    "product_stage_dpd": {
+        "columns": [
+            "Product ID",
+            "Product Name",
+            "Stage",
             "DPD Bucket",
             "Loan Count",
             "Total EAD",
-            "Outstanding Principal",
             "Total Provision",
+            "DPD-Stage Mismatch",
         ],
-        "rows": 5,
-    },
-    "fvtpl": {"columns": ["note"], "rows": 1},
-    "geographic": {
-        "columns": ["State", "Total EAD", "Total Provision", "Loan Count"],
-        "rows": 3,
-    },
-    "negative_check": {
-        "columns": ["Column", "Total Rows", "Negative Count", "Null Count", "Has Issue"],
-        "rows": 10,
+        "rows": 6,
     },
     "pivot": {
         "columns": [
@@ -91,6 +104,46 @@ EXPECTED: dict[str, dict] = {
         ],
         "rows": 8,
     },
+    "stage_summary": {
+        "columns": [
+            "stage",
+            "Total EAD",
+            "Total Provision",
+            "Provision as per Policy",
+            "Additional Provision",
+            "Loan Count",
+            "Coverage %",
+        ],
+        "rows": 3,
+    },
+    "dpd_summary": {
+        "columns": [
+            "DPD Bucket",
+            "Loan Count",
+            "Total EAD",
+            "Outstanding Principal",
+            "Total Provision",
+        ],
+        "rows": 5,
+    },
+    "security": {
+        "columns": [
+            "Stage",
+            "Covered (Secured)",
+            "Uncovered (Unsecured)",
+            "Total EAD",
+            "Security Coverage %",
+        ],
+        "rows": 3,
+    },
+    "writeoff": {
+        "columns": ["written_off", "stage", "Total EAD", "Total Provision", "Loan Count"],
+        "rows": 4,
+    },
+    "sbu": {
+        "columns": ["SBU", "Sub-SBU", "Total EAD", "Total Provision", "Loan Count"],
+        "rows": 2,
+    },
     "provision_check": {
         "columns": [
             "Loan ID",
@@ -104,36 +157,43 @@ EXPECTED: dict[str, dict] = {
         ],
         "rows": 18,
     },
-    "security": {
-        "columns": [
-            "Stage",
-            "Covered (Secured)",
-            "Uncovered (Unsecured)",
-            "Total EAD",
-            "Security Coverage %",
-        ],
-        "rows": 3,
-    },
-    "stage_dpd": {
-        "columns": ["Stage", "DPD Bucket", "Loan Count", "Total EAD", "DPD-Stage Mismatch Flag"],
-        "rows": 6,
+    "negative_check": {
+        "columns": ["Column", "Total Rows", "Negative Count", "Null Count", "Has Issue"],
+        "rows": 10,
     },
     "stage_mismatch": {"columns": ["note"], "rows": 1},
-    "stage_summary": {
-        "columns": [
-            "stage",
-            "Total EAD",
-            "Total Provision",
-            "Provision as per Policy",
-            "Additional Provision",
-            "Loan Count",
-            "Coverage %",
-        ],
+    "fvtpl": {"columns": ["note"], "rows": 1},
+    "portfolio_concentration": {
+        "columns": ["Rank", "loan_id", "Total EAD", "Loan Count"],
+        "rows": 10,
+    },
+    "stage_distribution": {
+        "columns": ["stage", "Loan Count", "Total EAD"],
         "rows": 3,
     },
-    "writeoff": {
-        "columns": ["written_off", "stage", "Total EAD", "Total Provision", "Loan Count"],
-        "rows": 4,
+    "dpd_risk_distribution": {
+        "columns": ["dpd_bucket", "Loan Count", "Total EAD"],
+        "rows": 5,
+    },
+    "collateral_coverage": {
+        "columns": ["Coverage Type", "Amount", "Percent"],
+        "rows": 3,
+    },
+    "provision_coverage": {
+        "columns": ["Coverage Type", "Amount", "Percent"],
+        "rows": 3,
+    },
+    "writeoff_recovery": {
+        "columns": ["written_off", "Loan Count", "Total EAD"],
+        "rows": 2,
+    },
+    "sanction_disbursement": {
+        "columns": ["Amount Type", "Amount", "Percent"],
+        "rows": 3,
+    },
+    "data_quality_ead": {
+        "columns": ["Column", "Present", "Missing", "Percent Missing"],
+        "rows": 8,
     },
 }
 
