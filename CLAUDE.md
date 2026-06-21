@@ -214,7 +214,7 @@ FCMR/
 ├── pyproject.toml                deps, ruff, black, pytest config
 ├── requirements.txt              Vercel runtime deps (subset — see §18)
 ├── vercel.json                   builds api/index.py, routes /* → it
-├── start.bat                     one-click local: venv → git pull → uvicorn --reload :8000
+├── start.bat                     one-click local: venv → git pull → uvicorn :8000
 ├── .env.example                  template for local dev vars
 ├── .env.production.example       template for Vercel/prod vars
 └── .github/workflows/ci.yml      ruff + black --check + pytest (py3.13)
@@ -514,7 +514,7 @@ start.bat                                            # Windows one-click: venv �
 
 python -m venv .venv && .venv\Scripts\activate
 pip install -e ".[dev]"
-uvicorn app.main:app --reload                        # http://localhost:8000  (admin/admin123)
+uvicorn app.main:app --port 8000                     # http://localhost:8000  (admin/admin123)
 
 ruff check . --fix && black .                        # lint + format
 pytest -m "not perf" -v                              # tests (skip slow e2e)
