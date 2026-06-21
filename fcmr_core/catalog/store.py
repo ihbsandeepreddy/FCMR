@@ -89,6 +89,11 @@ def init_catalog() -> None:
                 created_at    TEXT NOT NULL
             )
         """)
+        # Migrate users table: add role column (default 'admin' for backward compat)
+        try:
+            con.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'")
+        except Exception:
+            pass  # Column already exists
 
         # Engagements table
         con.execute("""
