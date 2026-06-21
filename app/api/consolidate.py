@@ -16,7 +16,7 @@ import os
 import shutil
 import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import polars as pl
 from fastapi import APIRouter, HTTPException, Request
@@ -65,17 +65,21 @@ async def reconcile_form(request: Request, batch_id: str):
             )
         raise HTTPException(status_code=409, detail="Batch already processed")
 
-    entries = [FileEntry.from_dict(d) for d in json.loads(batch["files_json"] or "[]")]
-    groups = group_files_by_signature(entries)
-    ordered = list(groups.items())  # stable order shared by GET + POST
-    unified_cols = unified_columns(groups)
-    alignment = suggest_alignment(groups, unified_cols)
+    try:
+        entries = [FileEntry.from_dict(d) for d in json.loads(batch["files_json"] or "[]")]
+        groups = group_files_by_signature(entries)
+        ordered = list(groups.items())  # stable order shared by GET + POST
+        unified_cols = unified_columns(groups)
+        alignment = suggest_alignment(groups, unified_cols)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not load reconciliation data: {exc}") from exc
 
     group_views = [
         {
             "gidx": gi,
             "signature": sig,
-            "files": [f.name for f in g["files"]],
+            # Show just the filename (strip folder-upload path prefix like "folder/sub/file.csv")
+            "files": [PurePosixPath(f.name).name or f.name for f in g["files"]],
             "headers": g["headers"],
             "alignment": alignment[sig],
         }
