@@ -1,16 +1,29 @@
 """EAD Portfolio Analytics — Ind AS 109 / ECL report suite.
 
 Operates on a merged Polars DataFrame of all EAD uploads for an engagement.
-All 13 compute functions are pure Polars (vectorised, no Python loops).
+All compute functions are pure Polars (vectorised, no Python loops).
 Missing columns are skipped gracefully so the suite works even when a field
 was not mapped or was not present in the source files.
+
+5 primary analytics filter to the **last month** using the ``business_date``
+column (max value = most recent snapshot):
+  - UCID → LAN Count        (ucid_lan)
+  - State-wise EAD           (state_ead)
+  - Disbursements in Period  (disbursement)  — uses engagement period dates
+  - Product-wise EAD         (product_ead)
+  - Product × Stage × DPD   (product_stage_dpd)
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 
 import polars as pl
+
+from fcmr_core.logging_setup import get_logger
+
+logger = get_logger("processing")
 
 from fcmr_core.analytics.ead_summary import (
     generate_collateral_coverage,
@@ -160,7 +173,7 @@ def _is_high_dpd(series: pl.Series) -> pl.Series:
 def _available_dims(df: pl.DataFrame) -> list[str]:
     """Return canonical dimension column names present in df, in display-name order."""
     cols = []
-    for canonical, display in PIVOT_DIMENSION_CANONICAL.items():
+    for canonical in PIVOT_DIMENSION_CANONICAL:
         if canonical in df.columns:
             cols.append(canonical)
     for raw in PIVOT_DIMENSION_RAW:
@@ -169,17 +182,278 @@ def _available_dims(df: pl.DataFrame) -> list[str]:
     return cols
 
 
+def _filter_last_month(df: pl.DataFrame) -> pl.DataFrame:
+    """Filter to rows where business_date == max(business_date).
+
+    Uses the canonical ``business_date`` column added to the EAD schema.
+    If the column is absent or unparseable, returns df unchanged.
+    """
+    if "business_date" not in df.columns:
+        return df
+    # Try to parse as Date for correct chronological sorting
+    parsed = df["business_date"].cast(pl.Date, strict=False)
+    non_null = parsed.drop_nulls()
+    if non_null.len() > 0:
+        max_val = non_null.max()
+        return df.filter(parsed == max_val)
+    # Fallback: string comparison (works if dates are already in ISO YYYY-MM-DD)
+    max_str = df["business_date"].drop_nulls().max()
+    if max_str is None:
+        return df
+    return df.filter(pl.col("business_date") == max_str)
+
+
 # ---------------------------------------------------------------------------
-# 1. Master pivot report
+# PRIMARY ANALYTICS 1 — UCID → LAN Count (last month)
+# ---------------------------------------------------------------------------
+
+
+def generate_ucid_lan_count(df: pl.DataFrame) -> pl.DataFrame:
+    """Count distinct LANs per UCID for the last business_date month."""
+    df = _filter_last_month(df)
+    if "ucid" not in df.columns:
+        return pl.DataFrame(
+            {"note": ["ucid column not available — map the UCID column in EAD schema"]}
+        )
+    if "loan_id" not in df.columns:
+        return pl.DataFrame({"note": ["loan_id column not available"]})
+
+    agg: list[pl.Expr] = [pl.col("loan_id").count().alias("LAN Count")]
+    if "ead" in df.columns:
+        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
+    if "total_provision" in df.columns:
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
+
+    result = df.group_by("ucid").agg(agg).rename({"ucid": "UCID"})
+    return result.sort("LAN Count", descending=True)
+
+
+# ---------------------------------------------------------------------------
+# PRIMARY ANALYTICS 2 — State-wise EAD Balance (last month)
+# ---------------------------------------------------------------------------
+
+
+def generate_state_ead(df: pl.DataFrame) -> pl.DataFrame:
+    """State-wise EAD, loan count and provision for the last business_date month."""
+    df = _filter_last_month(df)
+    if "state" not in df.columns:
+        return pl.DataFrame({"note": ["state column not available"]})
+
+    agg: list[pl.Expr] = []
+    if "loan_id" in df.columns:
+        agg.append(pl.col("loan_id").count().alias("Loan Count"))
+    if "ead" in df.columns:
+        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
+    if "total_provision" in df.columns:
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
+    if not agg:
+        agg = [pl.len().alias("Loan Count")]
+
+    result = df.group_by("state").agg(agg).rename({"state": "State"})
+
+    if "Total EAD" in result.columns and "Total Provision" in result.columns:
+        result = result.with_columns(
+            (pl.col("Total Provision") / pl.col("Total EAD") * 100).round(2).alias("Coverage %")
+        )
+
+    sort_col = "Total EAD" if "Total EAD" in result.columns else "State"
+    return result.sort(sort_col, descending=("EAD" in sort_col))
+
+
+# ---------------------------------------------------------------------------
+# PRIMARY ANALYTICS 3 — Disbursements in Audit Period
+# ---------------------------------------------------------------------------
+
+
+def generate_disbursement_summary(
+    df: pl.DataFrame,
+    period_from: str | None = None,
+    period_to: str | None = None,
+) -> pl.DataFrame:
+    """Disbursements where disbursement_date falls within the engagement period."""
+    if "disbursement_date" not in df.columns:
+        return pl.DataFrame({"note": ["disbursement_date column not available"]})
+
+    df = df.with_columns(
+        pl.col("disbursement_date").cast(pl.Date, strict=False).alias("_disb_date")
+    )
+
+    if period_from:
+        try:
+            from_dt = _dt.date.fromisoformat(period_from)
+            df = df.filter(pl.col("_disb_date") >= pl.lit(from_dt))
+        except (ValueError, TypeError):
+            pass
+
+    if period_to:
+        try:
+            to_dt = _dt.date.fromisoformat(period_to)
+            df = df.filter(pl.col("_disb_date") <= pl.lit(to_dt))
+        except (ValueError, TypeError):
+            pass
+
+    df = df.filter(pl.col("_disb_date").is_not_null())
+
+    if df.is_empty():
+        period_note = (
+            f" for period {period_from or '?'} to {period_to or '?'}"
+            if (period_from or period_to)
+            else ""
+        )
+        return pl.DataFrame({"note": [f"No disbursements found{period_note}"]})
+
+    df = df.with_columns(
+        pl.col("_disb_date").dt.strftime("%Y-%m").alias("Disbursement Month")
+    )
+
+    group_cols = ["Disbursement Month"] + [
+        c for c in ["scheme_id", "scheme_name", "state"] if c in df.columns
+    ]
+
+    agg: list[pl.Expr] = []
+    if "loan_id" in df.columns:
+        agg.append(pl.col("loan_id").count().alias("New Loans"))
+    if "disbursed_amount" in df.columns:
+        agg.append(
+            pl.col("disbursed_amount").cast(pl.Float64, strict=False).sum().alias("Total Disbursed")
+        )
+    if "sanction_amount" in df.columns:
+        agg.append(
+            pl.col("sanction_amount")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Total Sanctioned")
+        )
+    if not agg:
+        agg = [pl.len().alias("New Loans")]
+
+    rename_map = {"scheme_id": "Product ID", "scheme_name": "Product Name", "state": "State"}
+    result = (
+        df.group_by(group_cols)
+        .agg(agg)
+        .rename({k: v for k, v in rename_map.items() if k in group_cols})
+    )
+
+    sort_cols = ["Disbursement Month"] + [
+        rename_map.get(c, c) for c in ["scheme_id", "scheme_name", "state"] if c in group_cols
+    ]
+    valid_sort = [c for c in sort_cols if c in result.columns]
+    return result.sort(valid_sort) if valid_sort else result
+
+
+# ---------------------------------------------------------------------------
+# PRIMARY ANALYTICS 4 — Product-wise EAD Balance (last month)
+# ---------------------------------------------------------------------------
+
+
+def generate_product_ead(df: pl.DataFrame) -> pl.DataFrame:
+    """Product-wise (scheme_id / ProductID) EAD for the last business_date month."""
+    df = _filter_last_month(df)
+    group_cols = [c for c in ["scheme_id", "scheme_name"] if c in df.columns]
+    if not group_cols:
+        return pl.DataFrame(
+            {"note": ["scheme_id / scheme_name (ProductID / ProductName) columns not available"]}
+        )
+
+    agg: list[pl.Expr] = []
+    if "loan_id" in df.columns:
+        agg.append(pl.col("loan_id").count().alias("Loan Count"))
+    if "ead" in df.columns:
+        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
+    if "total_provision" in df.columns:
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
+    if "outstanding_principal" in df.columns:
+        agg.append(
+            pl.col("outstanding_principal")
+            .cast(pl.Float64, strict=False)
+            .sum()
+            .alias("Outstanding Principal")
+        )
+    if not agg:
+        agg = [pl.len().alias("Loan Count")]
+
+    rename_map = {"scheme_id": "Product ID", "scheme_name": "Product Name"}
+    result = (
+        df.group_by(group_cols)
+        .agg(agg)
+        .rename({k: v for k, v in rename_map.items() if k in group_cols})
+    )
+
+    if "Total EAD" in result.columns and "Total Provision" in result.columns:
+        result = result.with_columns(
+            (pl.col("Total Provision") / pl.col("Total EAD") * 100).round(2).alias("Coverage %")
+        )
+
+    sort_col = "Total EAD" if "Total EAD" in result.columns else result.columns[0]
+    return result.sort(sort_col, descending=("EAD" in sort_col))
+
+
+# ---------------------------------------------------------------------------
+# PRIMARY ANALYTICS 5 — Product × Stage × DPD (last month)
+# ---------------------------------------------------------------------------
+
+
+def generate_product_stage_dpd(df: pl.DataFrame) -> pl.DataFrame:
+    """Stage × DPD breakdown by product for the last business_date month."""
+    df = _filter_last_month(df)
+    group_cols = [
+        c for c in ["scheme_id", "scheme_name", "stage", "dpd_bucket"] if c in df.columns
+    ]
+    if len(group_cols) < 2:
+        return pl.DataFrame(
+            {"note": ["Need at least scheme_id/scheme_name + stage/dpd_bucket columns"]}
+        )
+
+    agg: list[pl.Expr] = []
+    if "loan_id" in df.columns:
+        agg.append(pl.col("loan_id").count().alias("Loan Count"))
+    if "ead" in df.columns:
+        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
+    if "total_provision" in df.columns:
+        agg.append(
+            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
+        )
+    if not agg:
+        agg = [pl.len().alias("Loan Count")]
+
+    rename_map = {
+        "scheme_id": "Product ID",
+        "scheme_name": "Product Name",
+        "stage": "Stage",
+        "dpd_bucket": "DPD Bucket",
+    }
+    result = (
+        df.group_by(group_cols)
+        .agg(agg)
+        .rename({k: v for k, v in rename_map.items() if k in group_cols})
+    )
+
+    # Flag: DPD > 90 but Stage = 1
+    if "DPD Bucket" in result.columns and "Stage" in result.columns:
+        high_dpd = _is_high_dpd(result["DPD Bucket"])
+        stage_1 = result["Stage"].cast(pl.Utf8, strict=False).str.strip_chars() == "1"
+        result = result.with_columns((high_dpd & stage_1).alias("DPD-Stage Mismatch"))
+
+    sort_cols = [
+        c for c in ["Product Name", "Product ID", "Stage", "DPD Bucket"] if c in result.columns
+    ]
+    return result.sort(sort_cols) if sort_cols else result
+
+
+# ---------------------------------------------------------------------------
+# 6. Master pivot report (all months)
 # ---------------------------------------------------------------------------
 
 
 def generate_pivot_report(df: pl.DataFrame) -> pl.DataFrame:
     """GROUP BY all available dimension columns, SUM/COUNT all measure columns."""
     dim_cols = _available_dims(df)
-    if not dim_cols:
-        # No dimension columns at all — return a single aggregate row
-        dim_cols = []
 
     agg_exprs: list[pl.Expr] = []
 
@@ -210,13 +484,12 @@ def generate_pivot_report(df: pl.DataFrame) -> pl.DataFrame:
     else:
         result = df.select(agg_exprs)
 
-    # Drop temp columns from result (they shouldn't be there after agg, but be safe)
     result = result.select([c for c in result.columns if not c.startswith("__tmp_")])
     return result
 
 
 # ---------------------------------------------------------------------------
-# 2. Stage-wise ECL summary
+# 7. Stage-wise ECL summary (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -253,7 +526,6 @@ def generate_stage_summary(df: pl.DataFrame) -> pl.DataFrame:
 
     result = df.group_by("stage").agg(agg).sort("stage")
 
-    # Derived: coverage %
     if "Total EAD" in result.columns and "Total Provision" in result.columns:
         result = result.with_columns(
             (pl.col("Total Provision") / pl.col("Total EAD") * 100).round(2).alias("Coverage %")
@@ -263,7 +535,7 @@ def generate_stage_summary(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 3. DPD bucket summary
+# 8. DPD bucket summary (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -297,90 +569,7 @@ def generate_dpd_summary(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 4. Stage × DPD cross-tab
-# ---------------------------------------------------------------------------
-
-
-def generate_stage_dpd_crosstab(df: pl.DataFrame) -> pl.DataFrame:
-    if "stage" not in df.columns or "dpd_bucket" not in df.columns:
-        return pl.DataFrame({"note": ["stage or dpd_bucket column not available"]})
-
-    agg: list[pl.Expr] = []
-    if "loan_id" in df.columns:
-        agg.append(pl.col("loan_id").count().alias("Loan Count"))
-    if "ead" in df.columns:
-        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
-
-    if not agg:
-        agg = [pl.len().alias("Loan Count")]
-
-    result = df.group_by(["stage", "dpd_bucket"]).agg(agg).sort(["stage", "dpd_bucket"])
-    result = result.rename({"stage": "Stage", "dpd_bucket": "DPD Bucket"})
-
-    # Flag: DPD > 90 but Stage = 1
-    high_dpd = _is_high_dpd(result["DPD Bucket"])
-    stage_1 = result["Stage"].cast(pl.Utf8, strict=False).str.strip_chars() == "1"
-    result = result.with_columns((high_dpd & stage_1).alias("DPD-Stage Mismatch Flag"))
-    return result
-
-
-# ---------------------------------------------------------------------------
-# 5. Product-wise breakup
-# ---------------------------------------------------------------------------
-
-
-def generate_product_summary(df: pl.DataFrame) -> pl.DataFrame:
-    group_cols = [c for c in ["scheme_id", "scheme_name"] if c in df.columns]
-    if not group_cols:
-        return pl.DataFrame({"note": ["scheme_id / scheme_name columns not available"]})
-
-    agg: list[pl.Expr] = []
-    if "ead" in df.columns:
-        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
-    if "total_provision" in df.columns:
-        agg.append(
-            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
-        )
-    if "loan_id" in df.columns:
-        agg.append(pl.col("loan_id").count().alias("Loan Count"))
-    if not agg:
-        agg = [pl.len().alias("Loan Count")]
-
-    rename = {"scheme_id": "Product ID", "scheme_name": "Product Name"}
-    return (
-        df.group_by(group_cols)
-        .agg(agg)
-        .rename({k: v for k, v in rename.items() if k in group_cols})
-        .sort(group_cols[0])
-    )
-
-
-# ---------------------------------------------------------------------------
-# 6. Geographic (state) concentration
-# ---------------------------------------------------------------------------
-
-
-def generate_geographic_summary(df: pl.DataFrame) -> pl.DataFrame:
-    if "state" not in df.columns:
-        return pl.DataFrame({"note": ["state column not available"]})
-
-    agg: list[pl.Expr] = []
-    if "ead" in df.columns:
-        agg.append(pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"))
-    if "total_provision" in df.columns:
-        agg.append(
-            pl.col("total_provision").cast(pl.Float64, strict=False).sum().alias("Total Provision")
-        )
-    if "loan_id" in df.columns:
-        agg.append(pl.col("loan_id").count().alias("Loan Count"))
-    if not agg:
-        agg = [pl.len().alias("Loan Count")]
-
-    return df.group_by("state").agg(agg).rename({"state": "State"}).sort("State")
-
-
-# ---------------------------------------------------------------------------
-# 7. Secured vs unsecured
+# 9. Secured vs unsecured (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -420,7 +609,7 @@ def generate_security_summary(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 8. Write-off summary
+# 10. Write-off summary (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -445,7 +634,7 @@ def generate_writeoff_summary(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 9. SBU / SubSBU breakdown
+# 11. SBU / SubSBU breakdown (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -476,7 +665,7 @@ def generate_sbu_summary(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 10. Provision reasonableness check
+# 12. Provision reasonableness check (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -499,7 +688,6 @@ def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
             .cast(pl.Float64, strict=False)
             .alias("existing_provision")
         )
-        # ratio = additional / existing (avoid div by zero)
         result = result.with_columns(
             pl.when(pl.col("existing_provision") > 0)
             .then(
@@ -510,7 +698,6 @@ def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
             .round(4)
             .alias("Ratio (Addl/Policy)")
         )
-        # Flag outliers: ratio > 2× median ratio
         ratios = result["Ratio (Addl/Policy)"].drop_nulls()
         if ratios.len() > 0:
             median_ratio = ratios.median()
@@ -530,7 +717,7 @@ def generate_provision_check(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 11. Negative values check
+# 13. Negative values check (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -588,7 +775,7 @@ def generate_negative_check(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 12. Stage-DPD mismatch
+# 14. Stage-DPD mismatch (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -599,12 +786,10 @@ def generate_stage_mismatch(df: pl.DataFrame) -> pl.DataFrame:
     stage_str = df["stage"].cast(pl.Utf8, strict=False).str.strip_chars()
     conditions = []
 
-    # DPD > 90 but classified as Stage 1
     if "dpd_bucket" in df.columns:
         high_dpd = _is_high_dpd(df["dpd_bucket"])
         conditions.append(high_dpd & (stage_str == "1"))
 
-    # Loan closed/written-off but Stage 2 or 3
     if "loan_status" in df.columns:
         ls_lower = df["loan_status"].cast(pl.Utf8, strict=False).str.to_lowercase().fill_null("")
         is_closed = ls_lower.map_elements(
@@ -644,7 +829,7 @@ def generate_stage_mismatch(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 13. FVTPL split
+# 15. FVTPL split (all months)
 # ---------------------------------------------------------------------------
 
 
@@ -670,33 +855,34 @@ def generate_fvtpl_split(df: pl.DataFrame) -> pl.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Excel workpaper builder
+# Report registry — order matters (primary 5 first, additional 10 after)
 # ---------------------------------------------------------------------------
 
-_REPORT_SHEET_NAMES: list[tuple[str, str]] = [
-    ("pivot", "Pivot Report"),
-    ("stage_summary", "Stage Summary"),
-    ("dpd_summary", "DPD Summary"),
-    ("stage_dpd", "Stage x DPD"),
-    ("product", "Product Breakup"),
-    ("geographic", "Geography"),
-    ("security", "Secured vs Unsecured"),
-    ("writeoff", "Write-Off Summary"),
-    ("sbu", "SBU Breakdown"),
-    ("provision_check", "Provision Check"),
-    ("negative_check", "Negative Values"),
-    ("stage_mismatch", "Stage Mismatch"),
-    ("fvtpl", "FVTPL Split"),
-    # EAD Summary Reports (8 audit-focused summaries)
-    ("portfolio_concentration", "Portfolio Concentration"),
-    ("stage_distribution", "Stage Distribution"),
-    ("dpd_risk_distribution", "DPD/Risk Distribution"),
-    ("collateral_coverage", "Collateral Coverage"),
-    ("provision_coverage", "Provision Coverage"),
-    ("writeoff_recovery", "Write-off & Recovery"),
-    ("sanction_disbursement", "Sanction vs Disbursement"),
-    ("data_quality_ead", "Data Quality Summary"),
+_REPORT_FUNCTIONS: list[tuple[str, object, str]] = [
+    ("ucid_lan",          generate_ucid_lan_count,      "UCID → LAN Count"),
+    ("state_ead",         generate_state_ead,            "State-wise EAD (Last Month)"),
+    ("disbursement",      generate_disbursement_summary, "Disbursements in Audit Period"),
+    ("product_ead",       generate_product_ead,          "Product-wise EAD (Last Month)"),
+    ("product_stage_dpd", generate_product_stage_dpd,   "Product × Stage × DPD"),
+    ("pivot",             generate_pivot_report,         "Master Pivot Report"),
+    ("stage_summary",     generate_stage_summary,        "Stage Summary"),
+    ("dpd_summary",       generate_dpd_summary,          "DPD Bucket Summary"),
+    ("security",          generate_security_summary,     "Secured vs Unsecured"),
+    ("writeoff",          generate_writeoff_summary,     "Write-Off Summary"),
+    ("sbu",               generate_sbu_summary,          "SBU / SubSBU Breakdown"),
+    ("provision_check",   generate_provision_check,      "Provision Reasonableness"),
+    ("negative_check",    generate_negative_check,       "Negative Values Check"),
+    ("stage_mismatch",    generate_stage_mismatch,       "Stage-DPD Mismatch"),
+    ("fvtpl",             generate_fvtpl_split,          "FVTPL Split"),
 ]
+
+# Derived list of (key, label) used by the API and templates
+_REPORT_SHEET_NAMES: list[tuple[str, str]] = [(k, lbl) for k, _, lbl in _REPORT_FUNCTIONS]
+
+
+# ---------------------------------------------------------------------------
+# Excel workpaper builder
+# ---------------------------------------------------------------------------
 
 
 def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> None:
@@ -751,7 +937,7 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
 
 
 def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> None:
-    """Write all 13 EAD reports into one multi-sheet Excel workpaper.
+    """Write all ran EAD reports into one multi-sheet Excel workpaper.
 
     Uses shared house-style colors and fonts from excel_style module.
     """
@@ -772,14 +958,13 @@ def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> 
             continue
         if first:
             ws = wb.active
-            ws.title = sheet_name
+            ws.title = sheet_name[:31]
             first = False
         else:
-            ws = wb.create_sheet(sheet_name)
+            ws = wb.create_sheet(sheet_name[:31])
         _write_sheet(ws, df, header_fill, header_font, data_font)
 
     if first:
-        # All empty — write a placeholder
         ws = wb.active
         ws.title = "Summary"
         ws["A1"] = "No data available"
@@ -792,81 +977,59 @@ def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> 
 # Top-level runner
 # ---------------------------------------------------------------------------
 
-_REPORT_FUNCTIONS = [
-    ("pivot", generate_pivot_report, "Master Pivot Report"),
-    ("stage_summary", generate_stage_summary, "Stage Summary"),
-    ("dpd_summary", generate_dpd_summary, "DPD Bucket Summary"),
-    ("stage_dpd", generate_stage_dpd_crosstab, "Stage × DPD Cross-tab"),
-    ("product", generate_product_summary, "Product Breakup"),
-    ("geographic", generate_geographic_summary, "Geographic Concentration"),
-    ("security", generate_security_summary, "Secured vs Unsecured"),
-    ("writeoff", generate_writeoff_summary, "Write-Off Summary"),
-    ("sbu", generate_sbu_summary, "SBU / SubSBU Breakdown"),
-    ("provision_check", generate_provision_check, "Provision Reasonableness"),
-    ("negative_check", generate_negative_check, "Negative Values Check"),
-    ("stage_mismatch", generate_stage_mismatch, "Stage-DPD Mismatch"),
-    ("fvtpl", generate_fvtpl_split, "FVTPL Split"),
-]
-
 
 def run_ead_analytics(
     df: pl.DataFrame,
     output_dir: Path,
+    report_keys: list[str] | None = None,
+    period_from: str | None = None,
+    period_to: str | None = None,
     on_progress=None,
 ) -> dict[str, Path]:
-    """Run all 13 EAD reports, write CSVs + Excel workpaper, return {name: path}."""
+    """Run EAD analytics reports, write CSVs + Excel workpaper, return {key: path}.
+
+    Args:
+        df: Merged EAD DataFrame (all uploads for the engagement).
+        output_dir: Directory to write CSV and Excel output files.
+        report_keys: List of report keys to run. ``None`` runs all 15.
+        period_from: Engagement period start date (ISO string, e.g. "2026-04-01").
+            Used by the disbursement analytics to filter rows.
+        period_to: Engagement period end date (ISO string).
+        on_progress: Optional callback(completed, total, label) for progress tracking.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
-    total = len(_REPORT_FUNCTIONS)
+
+    # Filter to requested reports; None = all
+    to_run: list[tuple[str, object, str]] = (
+        [(k, fn, lbl) for k, fn, lbl in _REPORT_FUNCTIONS if k in report_keys]
+        if report_keys is not None
+        else list(_REPORT_FUNCTIONS)
+    )
+
+    total = len(to_run) + 1  # +1 for workpaper step
     reports: dict[str, pl.DataFrame] = {}
     paths: dict[str, Path] = {}
 
-    for i, (key, fn, label) in enumerate(_REPORT_FUNCTIONS):
+    for i, (key, fn, label) in enumerate(to_run):
         if on_progress:
             on_progress(i, total, label)
         try:
-            result = fn(df)
+            # Disbursement function needs the engagement period dates
+            if key == "disbursement":
+                result = fn(df, period_from=period_from, period_to=period_to)  # type: ignore[call-arg]
+            else:
+                result = fn(df)  # type: ignore[call-arg]
             reports[key] = result
             if not result.is_empty():
                 csv_path = output_dir / f"{key}.csv"
                 result.write_csv(str(csv_path))
                 paths[key] = csv_path
         except Exception as exc:  # noqa: BLE001
-            # One report failure must not abort the whole suite; log and continue
             logger.warning(f"EAD report '{key}' failed: {exc}")
             reports[key] = pl.DataFrame({"note": [f"Error: {exc}"]})
 
-    # Compute 8 EAD summary reports
-    summary_reports = [
-        (
-            "portfolio_concentration",
-            generate_portfolio_concentration(df),
-            "Portfolio Concentration",
-        ),
-        ("stage_distribution", generate_stage_distribution(df), "Stage Distribution"),
-        ("dpd_risk_distribution", generate_dpd_risk_distribution(df), "DPD/Risk Distribution"),
-        ("collateral_coverage", generate_collateral_coverage(df), "Collateral Coverage"),
-        ("provision_coverage", generate_provision_coverage(df), "Provision Coverage"),
-        ("writeoff_recovery", generate_writeoff_recovery(df), "Write-off & Recovery"),
-        (
-            "sanction_disbursement",
-            generate_sanction_disbursement_variance(df),
-            "Sanction vs Disbursement",
-        ),
-        ("data_quality_ead", generate_data_quality_summary_ead(df), "Data Quality Summary"),
-    ]
-    for key, result, label in summary_reports:
-        try:
-            if result and not result.is_empty() and "note" not in result.columns:
-                reports[key] = result
-                if on_progress:
-                    on_progress(total, total, f"Summary: {label}")
-        except Exception as exc:  # noqa: BLE001
-            # Summary report failure; log and skip
-            logger.warning(f"EAD summary '{key}' failed: {exc}")
-            reports[key] = pl.DataFrame({"note": [f"Error: {exc}"]})
-
     if on_progress:
-        on_progress(total, total, "Building Excel workpaper")
+        on_progress(len(to_run), total, "Building Excel workpaper")
 
     workpaper_path = output_dir / "ead_workpaper.xlsx"
     try:

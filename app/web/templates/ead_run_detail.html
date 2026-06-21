@@ -65,7 +65,7 @@
   </div>
 
   <p class="help-text" style="margin-top:14px;">
-    13 reports are being computed in sequence. This page will refresh automatically when done.
+    Reports are being computed in sequence. This page will refresh automatically when done.
   </p>
 </div>
 
@@ -200,29 +200,20 @@
 </div>
 {% endif %}
 
-{# Tab bar #}
-{% set tab_list = [
-  ("pivot",           "Pivot Report"),
-  ("stage_summary",   "Stage Summary"),
-  ("dpd_summary",     "DPD Buckets"),
-  ("stage_dpd",       "Stage × DPD"),
-  ("product",         "Product"),
-  ("geographic",      "Geography"),
-  ("security",        "Sec vs Unsec"),
-  ("writeoff",        "Write-Off"),
-  ("sbu",             "SBU"),
-  ("provision_check", "Provision Check"),
-  ("negative_check",  "Negative Values"),
-  ("stage_mismatch",  "Mismatch"),
-  ("fvtpl",           "FVTPL"),
-] %}
+{# Tab bar — only show tabs for reports that actually ran (not missing) #}
+{% set visible_tabs = [] %}
+{% for key, label in tab_list %}
+  {% if previews and previews[key] is defined and not previews[key].get("missing") %}
+    {% set _ = visible_tabs.append((key, label)) %}
+  {% endif %}
+{% endfor %}
 
 <div class="tab-bar" id="tab-bar">
-  {% for key, label in tab_list %}
+  {% for key, label in visible_tabs %}
   <button class="tab-btn {% if loop.first %}active{% endif %}"
           onclick="switchTab('{{ key }}')" id="btn-{{ key }}">
     {{ label }}
-    {% if previews and previews[key] and previews[key].get("rows") %}
+    {% if previews and previews[key] is defined and previews[key].get("rows") %}
       {% set cnt = previews[key].total_rows %}
       {% if cnt %}<span style="font-size:10px; opacity:.7; margin-left:4px;">({{ cnt }})</span>{% endif %}
     {% endif %}
@@ -231,7 +222,7 @@
 </div>
 
 {# Tab panels #}
-{% for key, label in tab_list %}
+{% for key, label in visible_tabs %}
 <div class="tab-panel {% if loop.first %}active{% endif %}" id="panel-{{ key }}">
   <div class="card" style="padding:0; overflow:hidden;">
     <div style="padding:14px 20px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
@@ -299,7 +290,7 @@
   <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
     <div>
       <div class="card-title" style="margin-bottom:4px;">Full Analytics Workpaper</div>
-      <div class="card-sub">All 13 reports in one Excel file — terracotta-formatted headers, one sheet per report.</div>
+      <div class="card-sub">All selected reports in one Excel file — terracotta-formatted headers, one sheet per report.</div>
     </div>
     {% if workpaper_available %}
     <a href="/ead/runs/{{ run.run_id }}/download/workpaper" class="btn btn-primary btn-dl">

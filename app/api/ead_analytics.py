@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.analytics.ead_analytics import (
+    _REPORT_FUNCTIONS,
     _REPORT_SHEET_NAMES,
     compute_summary_stats,
     run_ead_analytics,
@@ -68,7 +69,13 @@ def _build_ead_df(engagement_id: str | None) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def _run_ead_background(run_id: str, engagement_id: str) -> None:
+def _run_ead_background(
+    run_id: str,
+    engagement_id: str,
+    report_keys: list[str] | None = None,
+    period_from: str | None = None,
+    period_to: str | None = None,
+) -> None:
     output_dir = settings.outputs_dir / f"ead_{run_id}"
 
     def _on_progress(completed: int, total: int, label: str) -> None:
@@ -87,7 +94,14 @@ def _run_ead_background(run_id: str, engagement_id: str) -> None:
             )
             return
 
-        run_ead_analytics(df, output_dir, on_progress=_on_progress)
+        run_ead_analytics(
+            df,
+            output_dir,
+            report_keys=report_keys,
+            period_from=period_from,
+            period_to=period_to,
+            on_progress=_on_progress,
+        )
         store.update_ead_run(
             run_id,
             status="completed",
@@ -116,8 +130,31 @@ async def trigger_ead_analytics(request: Request, background_tasks: BackgroundTa
     if not engagement_id:
         raise HTTPException(status_code=400, detail="No active engagement selected.")
 
+    form = await request.form()
+    selected = form.getlist("selected_reports")
+    valid_keys = {k for k, _, _ in _REPORT_FUNCTIONS}
+    report_keys: list[str] | None = [k for k in selected if k in valid_keys] or None
+
+    # Read engagement period for disbursement analytics
+    period_from: str | None = None
+    period_to: str | None = None
+    engagement = store.get_engagement(engagement_id)
+    if engagement:
+        period_from = engagement.get("period_from")
+        period_to = engagement.get("period_to")
+
     run_id = store.create_ead_run(engagement_id)
-    background_tasks.add_task(_run_ead_background, run_id, engagement_id)
+    if report_keys:
+        store.update_ead_run(run_id, selected_reports=json.dumps(report_keys))
+
+    background_tasks.add_task(
+        _run_ead_background,
+        run_id,
+        engagement_id,
+        report_keys,
+        period_from,
+        period_to,
+    )
     return RedirectResponse(url=f"/ead/runs/{run_id}", status_code=303)
 
 
@@ -142,7 +179,11 @@ async def ead_run_detail(request: Request, run_id: str):
     if not run:
         raise HTTPException(status_code=404, detail="EAD run not found")
 
-    context: dict = {"run": run, "report_keys": [k for k, _ in _REPORT_SHEET_NAMES]}
+    context: dict = {
+        "run": run,
+        "tab_list": list(_REPORT_SHEET_NAMES),
+        "report_keys": [k for k, _ in _REPORT_SHEET_NAMES],
+    }
 
     if run["status"] == "completed" and run.get("output_dir"):
         output_dir = Path(run["output_dir"])

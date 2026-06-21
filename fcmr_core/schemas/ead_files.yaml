@@ -190,3 +190,13 @@ columns:
     aliases: [onan_flag, is_onan, once_npa_always_npa, onan]
     required: false
     dtype: str
+
+  business_date:
+    aliases: [Businessdate, business_date, BusinessDate, report_date, as_of_date, value_date, business_dt]
+    required: false
+    dtype: str
+
+  ucid:
+    aliases: [UCID, ucid, UniqueCustomerID, unique_customer_id, customer_uid, cif, borrower_id, customer_id]
+    required: false
+    dtype: str

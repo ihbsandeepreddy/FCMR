@@ -63,9 +63,63 @@
           <a href="/runs" class="btn btn-ghost" style="margin-top:10px; display:inline-block; font-size:13px;">Configure analysis (select categories) →</a>
 
         {% elif upload.report_type == "ead_files" %}
-          {# EAD analytics — engagement-scoped #}
-          <form method="POST" action="/ead/analyze" style="margin-top:6px;">
-            <button type="submit" class="btn btn-run" style="display:inline-flex; align-items:center; gap:6px;">
+          {# EAD analytics — analytics selection + submit #}
+          <form method="POST" action="/ead/analyze" id="ead_run_form" style="margin-top:6px;">
+
+            {# Primary analytics (pre-checked) #}
+            <div style="margin-bottom:10px;">
+              <div style="font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em;">
+                Core Analytics
+              </div>
+              {% set primary = [
+                ("ucid_lan",          "UCID → LAN Count"),
+                ("state_ead",         "State-wise EAD Balance"),
+                ("disbursement",      "Disbursements in Audit Period"),
+                ("product_ead",       "Product-wise EAD Balance"),
+                ("product_stage_dpd", "Product × Stage × DPD"),
+              ] %}
+              {% for key, label in primary %}
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:5px; cursor:pointer;">
+                <input type="checkbox" name="selected_reports" value="{{ key }}" checked
+                       style="accent-color:var(--accent); width:15px; height:15px;">
+                {{ label }}
+              </label>
+              {% endfor %}
+            </div>
+
+            {# Additional analytics (collapsed, unchecked) #}
+            <details style="margin-bottom:10px;">
+              <summary style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; cursor:pointer; user-select:none; margin-bottom:6px;">
+                Additional Analytics ▸
+              </summary>
+              <div style="margin-top:8px; padding-left:4px;">
+                {% set additional = [
+                  ("pivot",           "Master Pivot Report"),
+                  ("stage_summary",   "Stage Summary"),
+                  ("dpd_summary",     "DPD Bucket Summary"),
+                  ("security",        "Secured vs Unsecured"),
+                  ("writeoff",        "Write-Off Summary"),
+                  ("sbu",             "SBU / SubSBU Breakdown"),
+                  ("provision_check", "Provision Reasonableness"),
+                  ("negative_check",  "Negative Values Check"),
+                  ("stage_mismatch",  "Stage-DPD Mismatch"),
+                  ("fvtpl",           "FVTPL Split"),
+                ] %}
+                {% for key, label in additional %}
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:5px; cursor:pointer;">
+                  <input type="checkbox" name="selected_reports" value="{{ key }}"
+                         style="accent-color:var(--accent); width:15px; height:15px;">
+                  {{ label }}
+                </label>
+                {% endfor %}
+                <div style="margin-top:8px; display:flex; gap:12px;">
+                  <a href="#" onclick="setAll(true); return false;" style="font-size:12px; color:var(--accent);">Select All</a>
+                  <a href="#" onclick="setAll(false); return false;" style="font-size:12px; color:var(--muted);">Clear All</a>
+                </div>
+              </div>
+            </details>
+
+            <button type="submit" class="btn btn-run" style="display:inline-flex; align-items:center; gap:6px; margin-top:4px;">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
                 <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
@@ -74,6 +128,17 @@
             </button>
           </form>
           <p class="help-text" style="margin-top:8px;">Runs on all ready EAD files in this engagement.</p>
+
+          <script>
+          function setAll(checked) {
+            document.querySelectorAll('#ead_run_form input[type=checkbox]')
+              .forEach(cb => cb.checked = checked);
+          }
+          document.getElementById('ead_run_form').addEventListener('submit', function(e) {
+            const any = [...this.querySelectorAll('input[type=checkbox]')].some(c => c.checked);
+            if (!any) { e.preventDefault(); alert('Please select at least one analytic to run.'); }
+          });
+          </script>
 
         {% else %}
           {# Other report types — no rules-based analytics yet #}

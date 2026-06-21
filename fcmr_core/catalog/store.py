@@ -218,6 +218,11 @@ def init_catalog() -> None:
                 progress_pct  INTEGER
             )
         """)
+        # Migrate ead_runs — additive only
+        try:
+            con.execute("ALTER TABLE ead_runs ADD COLUMN selected_reports TEXT")
+        except Exception:
+            pass  # Column already exists
 
         # Audit log for lifecycle events
         con.execute("""
@@ -940,6 +945,7 @@ def update_ead_run(run_id: str, **kwargs) -> None:
         "error",
         "progress_step",
         "progress_pct",
+        "selected_reports",
     }
     fields = {k: v for k, v in kwargs.items() if k in allowed}
     if not fields:
