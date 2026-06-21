@@ -13,7 +13,16 @@ from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Requ
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from fcmr_core.analytics.cm_summary import generate_geographic_distribution
+from fcmr_core.analytics.cm_summary import (
+    generate_cluster_distribution,
+    generate_coapplicant_overlap,
+    generate_data_quality_summary,
+    generate_demographic_distribution,
+    generate_duplication_summary,
+    generate_geographic_distribution,
+    generate_kyc_completeness,
+    generate_lan_concentration,
+)
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import read_parquet
@@ -343,7 +352,7 @@ async def run_detail(request: Request, run_id: str):
     summary = None
     ran_categories = None
     missing_summary = None
-    geographic_distribution = None
+    cm_summaries = {}  # All 8 CM summary reports
     rules_run = []
     sibling_runs = []
 
@@ -411,20 +420,78 @@ async def run_detail(request: Request, run_id: str):
                 if long_path.exists():
                     missing_summary = aggregate_missing_data(long_path, total)
 
-            # Compute geographic distribution summary (for CM runs)
+            # Compute all 8 CM summary reports (for CM runs)
             try:
                 upload = store.get_upload(run["upload_id"])
                 if upload and upload.get("report_type") == "customer_master":
                     df = store.get_upload_df(run["upload_id"])
                     if df is not None and not df.is_empty():
-                        geo_dist = generate_geographic_distribution(df)
-                        if geo_dist and not geo_dist.is_empty() and "note" not in geo_dist.columns:
-                            geographic_distribution = {
-                                "data": geo_dist.to_dicts(),
-                                "columns": geo_dist.columns,
+                        # Report #1: Geographic distribution
+                        geo = generate_geographic_distribution(df)
+                        if geo and not geo.is_empty() and "note" not in geo.columns:
+                            cm_summaries["geographic"] = {
+                                "title": "Geographic Distribution",
+                                "data": geo.to_dicts(),
+                                "columns": geo.columns,
+                            }
+                        # Report #2: KYC completeness
+                        kyc = generate_kyc_completeness(df)
+                        if kyc and not kyc.is_empty() and "note" not in kyc.columns:
+                            cm_summaries["kyc_completeness"] = {
+                                "title": "KYC Field Completeness",
+                                "data": kyc.to_dicts(),
+                                "columns": kyc.columns,
+                            }
+                        # Report #3: Demographics
+                        demo = generate_demographic_distribution(df)
+                        if demo and not demo.is_empty() and "note" not in demo.columns:
+                            cm_summaries["demographics"] = {
+                                "title": "Demographic Distribution",
+                                "data": demo.to_dicts(),
+                                "columns": demo.columns,
+                            }
+                        # Report #4: Duplication summary
+                        dup = generate_duplication_summary(df)
+                        if dup and not dup.is_empty() and "note" not in dup.columns:
+                            cm_summaries["duplicates"] = {
+                                "title": "Duplication Summary",
+                                "data": dup.to_dicts(),
+                                "columns": dup.columns,
+                            }
+                        # Report #5: Co-applicant overlap
+                        coapp = generate_coapplicant_overlap(df)
+                        if coapp and not coapp.is_empty() and "note" not in coapp.columns:
+                            cm_summaries["coapplicant"] = {
+                                "title": "Co-Applicant Overlap",
+                                "data": coapp.to_dicts(),
+                                "columns": coapp.columns,
+                            }
+                        # Report #6: Cluster distribution
+                        cluster = generate_cluster_distribution(df)
+                        if cluster and not cluster.is_empty() and "note" not in cluster.columns:
+                            cm_summaries["clusters"] = {
+                                "title": "Related-Party Clusters",
+                                "data": cluster.to_dicts(),
+                                "columns": cluster.columns,
+                            }
+                        # Report #7: Data quality
+                        dq = generate_data_quality_summary(df)
+                        if dq and not dq.is_empty() and "note" not in dq.columns:
+                            cm_summaries["data_quality"] = {
+                                "title": "Data Quality Summary",
+                                "data": dq.to_dicts(),
+                                "columns": dq.columns,
+                            }
+                        # Report #8: LAN concentration
+                        lan = generate_lan_concentration(df)
+                        if lan and not lan.is_empty() and "note" not in lan.columns:
+                            cm_summaries["lan_concentration"] = {
+                                "title": "LAN Concentration (Top 10)",
+                                "data": lan.to_dicts(),
+                                "columns": lan.columns,
                             }
             except Exception:
-                geographic_distribution = None
+                cm_summaries = {}
 
     return templates.TemplateResponse(
         request=request,
@@ -436,7 +503,7 @@ async def run_detail(request: Request, run_id: str):
             "bar_svg": bar_svg,
             "ran_categories": ran_categories,
             "missing_summary": missing_summary,
-            "geographic_distribution": geographic_distribution,
+            "cm_summaries": cm_summaries,
             "rules_run": rules_run,
             "sibling_runs": sibling_runs,
         },
