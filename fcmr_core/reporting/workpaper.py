@@ -655,8 +655,24 @@ def _build_detailed_exceptions_sheet(
         ws["A1"] = "Unable to load exception data"
 
 
-def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
-    """Build Test of Controls / Test of Details sheet with ICFR attributes."""
+def _build_toc_tod_sheet(
+    ws, sample_records, header_fill, header_font, border, max_rows: int = 5000
+):
+    """Build Test of Controls / Test of Details sheet with ICFR attributes.
+
+    Args:
+        max_rows: Maximum sample rows to write (default 5,000); prevents OOM on very large samples.
+    """
+    # Cap sample records for scale safety
+    total_samples = len(sample_records)
+    if total_samples > max_rows:
+        logger = get_logger(__name__)
+        logger.warning(
+            "toc_tod_truncated total=%d capped=%d",
+            total_samples,
+            max_rows,
+        )
+        sample_records = sample_records[:max_rows]
 
     # ICFR attribute map based on criticality/exception codes
     def get_control_objective(criticality):
@@ -723,6 +739,12 @@ def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
     # Adjust column widths
     for col_idx, width in enumerate([8, 10, 12, 28, 28, 14, 22, 15, 12, 12, 16], 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # Add truncation note if needed
+    if total_samples > max_rows:
+        note_row = len(sample_records) + 3
+        ws[f"A{note_row}"] = f"Note: Showing {max_rows:,} of {total_samples:,} sampled rows."
+        ws[f"A{note_row}"].font = Font(italic=True, size=10, color="666666")
 
 
 def _build_data_quality_sheet(ws, wide_csv_path, header_fill, header_font, border):
