@@ -45,21 +45,24 @@
       {% endfor %}
     </div>
 
-    {# Forensic Analytics (Catalogue-grounded) #}
-    {% if forensic_analytics %}
-    <div style="padding:16px; background:var(--bg); border:1px solid var(--border); border-radius:8px; margin-bottom:16px; margin-top:12px;">
-      <div style="font-weight:500; margin-bottom:12px; font-size:13.5px;">Forensic Analytics <span style="font-weight:400; color:var(--muted);">(optional, for CM only)</span></div>
-      <div style="display:flex; flex-direction:column; gap:10px;">
-        {% for fa in forensic_analytics %}
-        <label style="display:flex; align-items:center; cursor:pointer; font-size:12.5px; gap:8px; color:var(--fg);">
-          <input type="checkbox" name="forensic_analytics" value="{{ fa.key }}" class="forensic_checkbox">
-          <span class="mono" style="font-size:11px; background:var(--bg-alt); padding:2px 6px; border-radius:4px;">{{ fa.catalogue_id }}</span>
-          {{ fa.title }}
+      {# Forensic Analytics (Catalogue-grounded) - styled like a category #}
+      {% if forensic_analytics %}
+      <div style="margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--border);">
+        <label style="display:flex; align-items:center; cursor:pointer; font-weight:500; gap:8px; font-size:13.5px;">
+          <input type="checkbox" name="forensic_analytics_category" class="forensic_category_checkbox" data-category="forensic">
+          Forensic Analytics <span style="font-weight:400; color:var(--muted);">({{ forensic_analytics|length }} analytics)</span>
         </label>
-        {% endfor %}
+        <div style="margin-left:24px; margin-top:8px; display:flex; flex-direction:column; gap:6px;">
+          {% for fa in forensic_analytics %}
+          <label style="display:flex; align-items:center; cursor:pointer; font-size:12.5px; gap:6px; color:var(--fg);">
+            <input type="checkbox" name="forensic_analytics" value="{{ fa.key }}" class="forensic_checkbox" data-category="forensic">
+            <span class="mono" style="font-size:11px; background:var(--border); padding:2px 6px; border-radius:4px;">{{ fa.catalogue_id }}</span>
+            {{ fa.title }}
+          </label>
+          {% endfor %}
+        </div>
       </div>
-    </div>
-    {% endif %}
+      {% endif %}
 
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
       <button type="submit" name="mode" value="all" class="btn btn-run" id="run_all_btn" data-loading-text="Starting…">
@@ -252,6 +255,27 @@
       if (catCb) {
         catCb.checked = allChecked;
         catCb.indeterminate = someChecked && !allChecked;
+      }
+    });
+  });
+
+  // Forensic analytics category logic
+  const forensicCatCb = document.querySelector('.forensic_category_checkbox');
+  const forensicCheckboxes = document.querySelectorAll('.forensic_checkbox');
+  if (forensicCatCb) {
+    forensicCatCb.addEventListener('change', function() {
+      forensicCheckboxes.forEach(function(cb) {
+        cb.checked = forensicCatCb.checked;
+      });
+    });
+  }
+  forensicCheckboxes.forEach(function(cb) {
+    cb.addEventListener('change', function() {
+      const allChecked = Array.from(forensicCheckboxes).every(function(c) { return c.checked; });
+      const someChecked = Array.from(forensicCheckboxes).some(function(c) { return c.checked; });
+      if (forensicCatCb) {
+        forensicCatCb.checked = allChecked;
+        forensicCatCb.indeterminate = someChecked && !allChecked;
       }
     });
   });
