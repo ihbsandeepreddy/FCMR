@@ -66,18 +66,19 @@ body {
 }
 
 .sidebar-logo {
-  height: 120px;
+  height: 140px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 18px 16px;
+  padding: 24px 16px 20px 16px;
   gap: 9px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
 }
 
 .sidebar-logo-img {
-  max-width: 188px;
-  max-height: 96px;
+  max-width: 160px;
+  max-height: 88px;
   object-fit: contain;
 }
 
