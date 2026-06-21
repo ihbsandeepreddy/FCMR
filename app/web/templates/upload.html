@@ -250,12 +250,49 @@
       progressBar.style.width = "100%";
       progressPct.textContent = "100%";
       progressLabel.textContent = fileCount > 1
-        ? `Processing ${fileCount} files on server…`
-        : "Processing on server…";
+        ? `${fileCount} files uploaded — processing on server…`
+        : "File uploaded — processing on server…";
     });
+
+    function startProgressPolling(jobId) {
+      // Reset bar for server-side phase
+      progressBar.style.width = "0%";
+      progressPct.textContent = "0%";
+
+      const poll = setInterval(async function() {
+        try {
+          const resp = await fetch("/dashboard/upload-progress/" + jobId);
+          const data = await resp.json();
+          progressBar.style.width = data.pct + "%";
+          progressPct.textContent = data.pct + "%";
+          progressLabel.textContent = data.label || "Processing…";
+
+          if (data.status === "done") {
+            clearInterval(poll);
+            progressBar.style.width = "100%";
+            progressPct.textContent = "100%";
+            progressLabel.textContent = "Done! Redirecting…";
+            window.location.href = data.redirect;
+          } else if (data.status === "error") {
+            clearInterval(poll);
+            setError(data.label || "Processing failed. Please try again.");
+          }
+        } catch (e) {
+          // Network hiccup — keep polling
+        }
+      }, 600);
+    }
 
     xhr.addEventListener("load", function() {
       if (xhr.status >= 200 && xhr.status < 400) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.job_id) {
+            startProgressPolling(data.job_id);
+            return;
+          }
+        } catch (e) {}
+        // Fallback: plain redirect (should not happen)
         progressLabel.textContent = "Done! Redirecting…";
         window.location.href = xhr.responseURL;
       } else if (xhr.status === 413) {

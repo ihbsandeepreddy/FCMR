@@ -884,10 +884,36 @@ _REPORT_SHEET_NAMES: list[tuple[str, str]] = [(k, lbl) for k, _, lbl in _REPORT_
 # ---------------------------------------------------------------------------
 
 
-def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> None:
+def _is_monetary_col(col: str) -> bool:
+    """Return True if column likely contains monetary amounts (not counts/IDs/dates)."""
+    c = col.lower()
+    if c.endswith(("_count", "_pct", "_id", "_name", "_code", "_bucket",
+                   "_flag", "_date", "_month", "_desc", "_system")):
+        return False
+    if c in {"count", "stage", "ucid", "lan_count", "new_loans",
+              "dpd_stage_mismatch", "score", "ratio"}:
+        return False
+    return any(p in c for p in (
+        "ead", "provision", "outstanding", "principal", "disburse",
+        "sanction", "writeoff", "write_off", "recovery", "amount",
+        "balance", "interest", "premium", "exposure",
+    ))
+
+
+def _write_sheet(
+    ws,
+    df: pl.DataFrame,
+    header_fill,
+    header_font,
+    data_font,
+    *,
+    monetary_cols: frozenset[str] = frozenset(),
+) -> None:
     """Write a Polars DataFrame to an openpyxl worksheet.
 
     Preserves numeric types so Excel can format them (₹, %, etc).
+    Monetary columns are written as formulas dividing by Settings!$B$4 so the
+    unit-converter dropdown on the Settings sheet scales them live.
     """
     from openpyxl.styles import Alignment
     from openpyxl.utils import get_column_letter
@@ -899,20 +925,21 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    # Preserve numeric types (so Excel keeps them right-aligned & summable);
-    # cast everything else to string. Covers signed + unsigned ints and floats.
     _numeric_dtypes = (
-        pl.Int8,
-        pl.Int16,
-        pl.Int32,
-        pl.Int64,
-        pl.UInt8,
-        pl.UInt16,
-        pl.UInt32,
-        pl.UInt64,
-        pl.Float32,
-        pl.Float64,
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+        pl.Float32, pl.Float64,
     )
+    # Identify which column indices are numeric (0-based)
+    numeric_col_idx: set[int] = {
+        i for i, col in enumerate(cols) if df[col].dtype in _numeric_dtypes
+    }
+    # Identify which numeric columns are monetary (need divisor formula)
+    monetary_col_idx: set[int] = {
+        i for i in numeric_col_idx if cols[i] in monetary_cols
+    }
+
+    # Cast non-numeric to string for row iteration
     casts = [
         pl.col(col).cast(pl.Utf8, strict=False)
         for col in cols
@@ -922,10 +949,14 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
 
     for ri, row in enumerate(df_for_write.rows(), 2):
         for ci, val in enumerate(row, 1):
-            cell = ws.cell(
-                row=ri, column=ci, value=val if val not in (None, "None", "null") else None
-            )
-            cell.font = data_font
+            if val in (None, "None", "null"):
+                ws.cell(row=ri, column=ci, value=None).font = data_font
+            elif (ci - 1) in monetary_col_idx and val is not None:
+                # Monetary cell — formula divides by Settings!$B$4 (the unit divisor)
+                cell = ws.cell(row=ri, column=ci, value=f"={val}/Settings!$B$4")
+                cell.font = data_font
+            else:
+                ws.cell(row=ri, column=ci, value=val).font = data_font
 
     for ci, col in enumerate(cols, 1):
         max_len = min(max(len(col), 10), 40)
@@ -935,10 +966,96 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
         ws.freeze_panes = "A2"
 
 
+def _build_settings_sheet(ws) -> None:
+    """Write the unit-converter Settings sheet (always the first sheet)."""
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    ACCENT = "5C3D1E"   # terracotta (matches house style)
+    BG = "FDF6EE"       # warm beige
+
+    ws.title = "Settings"
+    ws.sheet_properties.tabColor = ACCENT
+
+    # Header banner
+    ws["A1"] = "EAD Workpaper — Display Settings"
+    ws["A1"].font = Font(bold=True, size=13, color="FFFFFF")
+    ws["A1"].fill = PatternFill(start_color=ACCENT, end_color=ACCENT, fill_type="solid")
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 28
+    ws.merge_cells("A1:C1")
+
+    # Unit selector row
+    ws["A3"] = "Display Unit"
+    ws["A3"].font = Font(bold=True, size=11)
+    ws["B3"] = "Lakhs (₹ Lakhs)"   # default
+    ws["B3"].font = Font(size=11, bold=True, color=ACCENT)
+    ws["B3"].fill = PatternFill(start_color=BG, end_color=BG, fill_type="solid")
+    ws["B3"].alignment = Alignment(horizontal="center", vertical="center")
+
+    # Data validation dropdown
+    dv = DataValidation(
+        type="list",
+        formula1='"Actual (₹),Lakhs (₹ Lakhs),Crores (₹ Cr),Millions (₹ Mn)"',
+        allow_blank=False,
+        showDropDown=False,
+    )
+    ws.add_data_validation(dv)
+    dv.add("B3")
+
+    # Divisor formula (evaluated by Excel, drives all monetary cells)
+    ws["A4"] = "Divisor"
+    ws["A4"].font = Font(size=10, color="888888")
+    ws["B4"] = (
+        '=IF(B3="Actual (₹)",1,'
+        'IF(B3="Lakhs (₹ Lakhs)",100000,'
+        'IF(B3="Crores (₹ Cr)",10000000,1000000)))'
+    )
+    ws["B4"].font = Font(size=10, color="888888")
+
+    # Unit label formula (for display)
+    ws["A5"] = "Unit Label"
+    ws["A5"].font = Font(size=10, color="888888")
+    ws["B5"] = (
+        '=IF(B3="Actual (₹)","₹",'
+        'IF(B3="Lakhs (₹ Lakhs)","₹ Lakhs",'
+        'IF(B3="Crores (₹ Cr)","₹ Cr","₹ Mn")))'
+    )
+    ws["B5"].font = Font(size=10, color="888888")
+
+    # Instructions
+    ws["A7"] = "How to use"
+    ws["A7"].font = Font(bold=True, size=10)
+    ws["B7"] = (
+        "Click the dropdown in cell B3 and select your preferred unit. "
+        "All monetary values across every sheet (EAD, Provision, Outstanding, etc.) "
+        "update automatically. Counts and percentages are unaffected."
+    )
+    ws["B7"].font = Font(size=10)
+    ws["B7"].alignment = Alignment(wrap_text=True)
+    ws.row_dimensions[7].height = 45
+
+    ws["A9"] = "Lead File Note"
+    ws["A9"].font = Font(bold=True, size=10)
+    ws["B9"] = (
+        "If you link this workpaper to a lead file, the lead file values "
+        "will also update when you change the unit here — all formulas divide by Settings!$B$4."
+    )
+    ws["B9"].font = Font(size=10)
+    ws["B9"].alignment = Alignment(wrap_text=True)
+    ws.row_dimensions[9].height = 45
+
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 55
+    ws.column_dimensions["C"].width = 8
+
+
 def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> None:
     """Write all ran EAD reports into one multi-sheet Excel workpaper.
 
-    Uses shared house-style colors and fonts from excel_style module.
+    Sheet 1 is always "Settings" — a unit-converter dropdown (Actual / Lakhs / Crores /
+    Millions) whose divisor value is referenced by every monetary cell across all data sheets.
+    Changing the dropdown instantly rescales all amounts; counts and percentages are unaffected.
     """
     import openpyxl
     from openpyxl.styles import Font
@@ -946,26 +1063,27 @@ def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> 
     from fcmr_core.reporting.excel_style import HEADER_FILL, HEADER_FONT
 
     wb = openpyxl.Workbook()
+
+    # Sheet 1: Settings (unit converter)
+    ws_settings = wb.active
+    _build_settings_sheet(ws_settings)
+
     header_fill = HEADER_FILL
     header_font = HEADER_FONT
     data_font = Font(size=10)
 
-    first = True
+    has_data = False
     for key, sheet_name in _REPORT_SHEET_NAMES:
         df = reports.get(key)
         if df is None or df.is_empty():
             continue
-        if first:
-            ws = wb.active
-            ws.title = sheet_name[:31]
-            first = False
-        else:
-            ws = wb.create_sheet(sheet_name[:31])
-        _write_sheet(ws, df, header_fill, header_font, data_font)
+        ws = wb.create_sheet(sheet_name[:31])
+        monetary_cols = frozenset(col for col in df.columns if _is_monetary_col(col))
+        _write_sheet(ws, df, header_fill, header_font, data_font, monetary_cols=monetary_cols)
+        has_data = True
 
-    if first:
-        ws = wb.active
-        ws.title = "Summary"
+    if not has_data:
+        ws = wb.create_sheet("Summary")
         ws["A1"] = "No data available"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)

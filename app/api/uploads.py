@@ -6,19 +6,34 @@ import hashlib
 import io
 import json
 import os
+import shutil
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import ingest_csv, sniff_headers
 from fcmr_core.schemas.loader import available_report_types, get_canonical_fields, get_schema
+
+# In-memory job registry: job_id → {status, pct, label, redirect}
+# status: "running" | "done" | "error"
+_upload_jobs: dict[str, dict] = {}
+
+
+def _job_set(job_id: str, pct: int, label: str, status: str = "running", redirect: str | None = None) -> None:
+    job = _upload_jobs.get(job_id)
+    if job is None:
+        return
+    job.update({"pct": pct, "label": label, "status": status})
+    if redirect is not None:
+        job["redirect"] = redirect
 
 
 def _now() -> str:
@@ -123,15 +138,15 @@ def _finalize_consolidated_upload(
     return upload_id
 
 
-@router.post("/upload")
-async def do_upload(
-    request: Request,
-    report_type: str = Form(...),
-    consolidate: str = Form("off"),
-    folder: list[UploadFile] = File(default=[]),
-    files: list[UploadFile] = File(default=[]),
-):
-    import shutil
+def _process_upload_job(
+    job_id: str,
+    report_type: str,
+    consolidate_on: bool,
+    engagement_id: str,
+    batch_id: str,
+    processed_files: list[tuple[str, bytes]],
+) -> None:
+    """Background thread: process uploaded files and update job progress."""
     import tempfile
     import zipfile
 
@@ -141,6 +156,96 @@ async def do_upload(
         suggest_alignment,
         unified_columns,
     )
+
+    try:
+        n = len(processed_files)
+
+        # ── Single file, or consolidation disabled ──────────────────────────────
+        if n == 1 or not consolidate_on:
+            last_upload_id = None
+            for i, (filename, content) in enumerate(processed_files):
+                base_pct = int(10 + 70 * i / n)
+                _job_set(job_id, base_pct, f"Saving file {i + 1}/{n}…")
+                upload_id = store.create_upload(
+                    report_type, filename, batch_id=batch_id, engagement_id=engagement_id
+                )
+                csv_path = settings.uploads_dir / upload_id / filename
+                _write_chunked(content, csv_path)
+                _job_set(job_id, base_pct + 20, f"Sniffing headers ({Path(filename).name})…")
+                headers = sniff_headers(csv_path)
+                store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
+                last_upload_id = upload_id
+
+            if n == 1 and last_upload_id:
+                _job_set(job_id, 100, "Done!", "done", f"/dashboard/uploads/{last_upload_id}/map-columns")
+            else:
+                _job_set(job_id, 100, "Done!", "done", "/dashboard")
+            return
+
+        # ── Multi-file consolidation ─────────────────────────────────────────────
+        batch_dir = settings.uploads_dir / f"_batch_{batch_id}"
+        entries: list[FileEntry] = []
+
+        for idx, (filename, content) in enumerate(processed_files):
+            pct = int(5 + 45 * idx / n)
+            _job_set(job_id, pct, f"Sniffing headers — file {idx + 1}/{n}…")
+            staged = batch_dir / f"{idx:04d}_{filename}"
+            _write_chunked(content, staged)
+            entries.append(
+                FileEntry(name=filename, path=str(staged), headers=sniff_headers(staged))
+            )
+
+        _job_set(job_id, 55, "Grouping files by column layout…")
+        groups = group_files_by_signature(entries)
+
+        if len(groups) == 1:
+            _job_set(job_id, 65, f"Building combined CSV from {n} files…")
+            ordered_groups = list(groups.items())
+            unified_cols = unified_columns(groups)
+            alignment = suggest_alignment(groups, unified_cols)
+            upload_id = _finalize_consolidated_upload(
+                report_type=report_type,
+                engagement_id=engagement_id,
+                batch_id=batch_id,
+                ordered_groups=ordered_groups,
+                alignment=alignment,
+                unified_cols=unified_cols,
+                source_names=[e.name for e in entries],
+            )
+            shutil.rmtree(batch_dir, ignore_errors=True)
+            _job_set(job_id, 100, "Done!", "done", f"/dashboard/uploads/{upload_id}/map-columns")
+        else:
+            _job_set(job_id, 85, f"{len(groups)} different layouts found — preparing reconciliation…")
+            store.create_batch(
+                batch_id,
+                report_type,
+                engagement_id=engagement_id,
+                files=[e.as_dict() for e in entries],
+            )
+            _job_set(job_id, 100, "Ready!", "done", f"/consolidate/reconcile/{batch_id}")
+
+    except Exception as exc:
+        _job_set(job_id, 0, f"Processing failed: {exc}", "error")
+
+
+@router.get("/upload-progress/{job_id}")
+async def upload_progress(request: Request, job_id: str):
+    job = _upload_jobs.get(job_id)
+    if not job:
+        return JSONResponse({"status": "not_found", "pct": 0, "label": "Job not found"})
+    return JSONResponse(job)
+
+
+@router.post("/upload")
+async def do_upload(
+    request: Request,
+    report_type: str = Form(...),
+    consolidate: str = Form("off"),
+    folder: list[UploadFile] = File(default=[]),
+    files: list[UploadFile] = File(default=[]),
+):
+    import tempfile
+    import zipfile
 
     # Get engagement_id from session. B2: an upload must belong to an engagement,
     # else it is invisible in the dashboard (invariant #7) — send the user to pick one.
@@ -161,95 +266,42 @@ async def do_upload(
     # Generate one batch_id for this upload request
     batch_id = str(uuid.uuid4())
 
-    # Process files from .zip if present
     temp_dir = None
     try:
-        processed_files = []
+        processed_files: list[tuple[str, bytes]] = []
 
         for file in upload_files:
             if file.filename and file.filename.lower().endswith(".zip"):
-                # Unzip and extract CSVs
                 content = await file.read()
                 temp_dir = tempfile.TemporaryDirectory()
                 with zipfile.ZipFile(io.BytesIO(content)) as zf:
                     zf.extractall(temp_dir.name)
-                # Collect all CSVs from unzipped directory
                 for root, dirs, filenames in os.walk(temp_dir.name):
                     for fname in filenames:
                         if fname.lower().endswith(".csv"):
                             full_path = Path(root) / fname
                             processed_files.append((fname, full_path.read_bytes()))
             elif file.filename and file.filename.lower().endswith(".csv"):
-                # Regular CSV file
                 content = await file.read()
                 processed_files.append((file.filename, content))
 
         if not processed_files:
             raise HTTPException(status_code=400, detail="No CSV files found.")
-
         for filename, content in processed_files:
             if len(content) > settings.max_upload_bytes:
                 raise HTTPException(status_code=413, detail=f"File {filename} exceeds 2 GB limit.")
 
-        # ── Single file, or consolidation disabled: one upload per file (legacy) ──
-        if len(processed_files) == 1 or not consolidate_on:
-            last_upload_id = None
-            for filename, content in processed_files:
-                upload_id = store.create_upload(
-                    report_type, filename, batch_id=batch_id, engagement_id=engagement_id
-                )
-                csv_path = settings.uploads_dir / upload_id / filename
-                _write_chunked(content, csv_path)
-                headers = sniff_headers(csv_path)
-                store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
-                last_upload_id = upload_id
-            # Single file → go straight to column mapping; multi-file (no-consolidate) → dashboard
-            if len(processed_files) == 1 and last_upload_id:
-                return RedirectResponse(
-                    url=f"/dashboard/uploads/{last_upload_id}/map-columns", status_code=303
-                )
-            return RedirectResponse(url="/dashboard", status_code=303)
+        # Create job entry and launch background processing thread
+        job_id = str(uuid.uuid4())
+        _upload_jobs[job_id] = {"status": "running", "pct": 3, "label": "Files received — starting…", "redirect": None}
 
-        # ── Multi-file consolidation: stage raws into a batch dir, group by layout ──
-        batch_dir = settings.uploads_dir / f"_batch_{batch_id}"
-        entries: list[FileEntry] = []
-        for idx, (filename, content) in enumerate(processed_files):
-            # Prefix with index to avoid collisions when files share a name
-            staged = batch_dir / f"{idx:04d}_{filename}"
-            _write_chunked(content, staged)
-            entries.append(
-                FileEntry(name=filename, path=str(staged), headers=sniff_headers(staged))
-            )
+        threading.Thread(
+            target=_process_upload_job,
+            args=(job_id, report_type, consolidate_on, engagement_id, batch_id, processed_files),
+            daemon=True,
+        ).start()
 
-        groups = group_files_by_signature(entries)
-
-        if len(groups) == 1:
-            # All files share one layout → merge straight away, then map once.
-            ordered_groups = list(groups.items())
-            unified_cols = unified_columns(groups)
-            alignment = suggest_alignment(groups, unified_cols)  # identity for a single group
-            upload_id = _finalize_consolidated_upload(
-                report_type=report_type,
-                engagement_id=engagement_id,
-                batch_id=batch_id,
-                ordered_groups=ordered_groups,
-                alignment=alignment,
-                unified_cols=unified_cols,
-                source_names=[e.name for e in entries],
-            )
-            shutil.rmtree(batch_dir, ignore_errors=True)
-            return RedirectResponse(
-                url=f"/dashboard/uploads/{upload_id}/map-columns", status_code=303
-            )
-
-        # ── Schema mismatch across files → guided reconciliation screen ──
-        store.create_batch(
-            batch_id,
-            report_type,
-            engagement_id=engagement_id,
-            files=[e.as_dict() for e in entries],
-        )
-        return RedirectResponse(url=f"/consolidate/reconcile/{batch_id}", status_code=303)
+        return JSONResponse({"job_id": job_id})
 
     finally:
         if temp_dir:
