@@ -154,3 +154,27 @@ def test_ead_baseline_unchanged():
     )
     for key, exp in EXPECTED.items():
         assert produced[key] == exp, f"EAD report '{key}' changed: {produced[key]} != {exp}"
+
+
+def test_ead_workpaper_builds_with_summaries():
+    """EAD workbook must build (sheet-name '/' fix) and include populated summaries.
+
+    Regression for two EAD bugs: (1) `if result` on a DataFrame raised, disabling all
+    8 summaries; (2) the 'DPD/Risk Distribution' sheet title contained '/', which
+    openpyxl rejects, so the whole workbook failed to build.
+    """
+    from openpyxl import load_workbook
+
+    df = _ead_frame()
+    with tempfile.TemporaryDirectory() as td:
+        paths = ea.run_ead_analytics(df, Path(td))
+        assert "workpaper" in paths, "EAD workpaper failed to build"
+        wb = load_workbook(paths["workpaper"])
+        sheets = set(wb.sheetnames)
+
+    # The 8 audit summaries must be present and not error placeholders.
+    for sheet in ["Stage Distribution", "Provision Coverage", "DPD-Risk Distribution"]:
+        assert sheet in sheets, f"missing summary sheet: {sheet}"
+        ws = wb[sheet]
+        header = [c.value for c in next(ws.iter_rows(max_row=1))]
+        assert header != ["note"], f"summary '{sheet}' is an error placeholder"

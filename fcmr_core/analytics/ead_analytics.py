@@ -21,10 +21,6 @@ from pathlib import Path
 
 import polars as pl
 
-from fcmr_core.logging_setup import get_logger
-
-logger = get_logger("processing")
-
 from fcmr_core.analytics.ead_summary import (
     generate_collateral_coverage,
     generate_data_quality_summary_ead,
@@ -37,7 +33,7 @@ from fcmr_core.analytics.ead_summary import (
 )
 from fcmr_core.logging_setup import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("processing")
 
 # ---------------------------------------------------------------------------
 # Column maps
@@ -859,21 +855,30 @@ def generate_fvtpl_split(df: pl.DataFrame) -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 _REPORT_FUNCTIONS: list[tuple[str, object, str]] = [
-    ("ucid_lan",          generate_ucid_lan_count,      "UCID → LAN Count"),
-    ("state_ead",         generate_state_ead,            "State-wise EAD (Last Month)"),
-    ("disbursement",      generate_disbursement_summary, "Disbursements in Audit Period"),
-    ("product_ead",       generate_product_ead,          "Product-wise EAD (Last Month)"),
-    ("product_stage_dpd", generate_product_stage_dpd,   "Product × Stage × DPD"),
-    ("pivot",             generate_pivot_report,         "Master Pivot Report"),
-    ("stage_summary",     generate_stage_summary,        "Stage Summary"),
-    ("dpd_summary",       generate_dpd_summary,          "DPD Bucket Summary"),
-    ("security",          generate_security_summary,     "Secured vs Unsecured"),
-    ("writeoff",          generate_writeoff_summary,     "Write-Off Summary"),
-    ("sbu",               generate_sbu_summary,          "SBU / SubSBU Breakdown"),
-    ("provision_check",   generate_provision_check,      "Provision Reasonableness"),
-    ("negative_check",    generate_negative_check,       "Negative Values Check"),
-    ("stage_mismatch",    generate_stage_mismatch,       "Stage-DPD Mismatch"),
-    ("fvtpl",             generate_fvtpl_split,          "FVTPL Split"),
+    ("ucid_lan",                    generate_ucid_lan_count,               "UCID → LAN Count"),
+    ("state_ead",                   generate_state_ead,                    "State-wise EAD (Last Month)"),
+    ("disbursement",                generate_disbursement_summary,         "Disbursements in Audit Period"),
+    ("product_ead",                 generate_product_ead,                  "Product-wise EAD (Last Month)"),
+    ("product_stage_dpd",           generate_product_stage_dpd,            "Product × Stage × DPD"),
+    ("pivot",                       generate_pivot_report,                 "Master Pivot Report"),
+    ("stage_summary",               generate_stage_summary,                "Stage Summary"),
+    ("dpd_summary",                 generate_dpd_summary,                  "DPD Bucket Summary"),
+    ("security",                    generate_security_summary,             "Secured vs Unsecured"),
+    ("writeoff",                    generate_writeoff_summary,             "Write-Off Summary"),
+    ("sbu",                         generate_sbu_summary,                  "SBU / SubSBU Breakdown"),
+    ("provision_check",             generate_provision_check,              "Provision Reasonableness"),
+    ("negative_check",              generate_negative_check,               "Negative Values Check"),
+    ("stage_mismatch",              generate_stage_mismatch,               "Stage-DPD Mismatch"),
+    ("fvtpl",                       generate_fvtpl_split,                  "FVTPL Split"),
+    # EAD summary reports (re-enabled; see fix B in v0.1.38 hardening)
+    ("portfolio_concentration",     generate_portfolio_concentration,      "Portfolio Concentration"),
+    ("stage_distribution",          generate_stage_distribution,           "Stage Distribution"),
+    ("dpd_risk_distribution",       generate_dpd_risk_distribution,        "DPD-Risk Distribution"),
+    ("collateral_coverage",         generate_collateral_coverage,          "Collateral Coverage"),
+    ("provision_coverage",          generate_provision_coverage,           "Provision Coverage"),
+    ("writeoff_recovery",           generate_writeoff_recovery,            "Write-off & Recovery"),
+    ("sanction_disbursement",       generate_sanction_disbursement_variance, "Sanction vs Disbursement"),
+    ("data_quality_ead",            generate_data_quality_summary_ead,     "Data Quality Summary"),
 ]
 
 # Derived list of (key, label) used by the API and templates
