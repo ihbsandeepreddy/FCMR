@@ -7,6 +7,46 @@ from __future__ import annotations
 
 import polars as pl
 
+# IFSC state codes (chars 5-6) → India state/UT abbreviations (conservative mapping)
+_IFSC_STATE_PREFIXES = {
+    "AN": "AN",  # Andaman & Nicobar
+    "AP": "AP",  # Andhra Pradesh
+    "AR": "AR",  # Arunachal Pradesh
+    "AS": "AS",  # Assam
+    "BR": "BR",  # Bihar
+    "CG": "CG",  # Chhattisgarh
+    "CH": "CH",  # Chandigarh
+    "DL": "DL",  # Delhi
+    "DD": "DD",  # Daman & Diu
+    "GA": "GA",  # Goa
+    "GJ": "GJ",  # Gujarat
+    "HR": "HR",  # Haryana
+    "HP": "HP",  # Himachal Pradesh
+    "JK": "JK",  # Jammu & Kashmir
+    "JH": "JH",  # Jharkhand
+    "KA": "KA",  # Karnataka
+    "KL": "KL",  # Kerala
+    "LA": "LA",  # Ladakh
+    "LD": "LD",  # Lakshadweep
+    "MP": "MP",  # Madhya Pradesh
+    "MH": "MH",  # Maharashtra
+    "MN": "MN",  # Manipur
+    "ML": "ML",  # Meghalaya
+    "MZ": "MZ",  # Mizoram
+    "NL": "NL",  # Nagaland
+    "OR": "OR",  # Odisha
+    "PB": "PB",  # Punjab
+    "RJ": "RJ",  # Rajasthan
+    "SK": "SK",  # Sikkim
+    "TN": "TN",  # Tamil Nadu
+    "TS": "TS",  # Telangana
+    "TR": "TR",  # Tripura
+    "UP": "UP",  # Uttar Pradesh
+    "UT": "UT",  # Uttarakhand
+    "WB": "WB",  # West Bengal
+    "PY": "PY",  # Puducherry
+}
+
 
 def generate_aadhaar_coverage(df: pl.DataFrame) -> pl.DataFrame:
     """Aadhaar coverage: % of portfolio with Aadhaar (KYC compliance mandate).
@@ -283,26 +323,24 @@ def generate_bank_account_anomalies(df: pl.DataFrame) -> pl.DataFrame:
 
     # Anomaly 3: IFSC state mismatch vs. customer state
     if "ifsc" in df.columns and "state" in df.columns:
-        # IFSC state code (extract char 5–6, map to state abbreviation)
-        # Simplified: flag when IFSC and state are both non-null but appear unrelated
-        # (Full validation would require a state-code lookup table)
+        # Extract IFSC state code (chars 4-5, zero-indexed) and compare vs. customer state
         state_mismatch = (
-            df.filter(
-                (pl.col("ifsc").is_not_null())
-                & (pl.col("state").is_not_null())
-                & (
-                    ~pl.col("ifsc")
+            df.filter((pl.col("ifsc").is_not_null()) & (pl.col("state").is_not_null()))
+            .with_columns(
+                [
+                    pl.col("ifsc")
                     .cast(pl.Utf8, strict=False)
                     .str.to_uppercase()
                     .str.slice(4, 2)
-                    .str.contains(
-                        pl.col("state")
-                        .cast(pl.Utf8, strict=False)
-                        .str.to_uppercase()
-                        .str.slice(0, 2)
-                    )
-                )
+                    .alias("ifsc_state_code"),
+                    pl.col("state")
+                    .cast(pl.Utf8, strict=False)
+                    .str.to_uppercase()
+                    .str.slice(0, 2)
+                    .alias("state_code"),
+                ]
             )
+            .filter(~pl.col("ifsc_state_code").eq(pl.col("state_code")))
             .select(pl.col("customer_id"))
             .n_unique()
         )

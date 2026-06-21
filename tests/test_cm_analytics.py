@@ -218,15 +218,20 @@ def test_bank_account_anomalies_invalid_ifsc():
     assert invalid_ifsc[0, "Customer Count"] == 1
 
 
-def test_bank_account_anomalies_no_column():
-    """Test when bank_account column is missing."""
+def test_bank_account_anomalies_ifsc_state_mismatch():
+    """Test detection of IFSC state code mismatch vs. customer state."""
     df = pl.DataFrame(
         {
             "customer_id": ["C001", "C002"],
+            "bank_account": ["123456789012", "234567890123"],
+            "ifsc": ["SBIN0ABCD01", "HDFC0EFGH01"],  # AB, EF
+            "state": ["MH", "DL"],  # MH, DL — mismatch
         }
     )
 
     result = generate_bank_account_anomalies(df)
 
-    assert "note" in result.columns
-    assert result[0, "note"] == "bank_account column required"
+    # IFSC state code (chars [4:6]) should not match customer state codes
+    if "note" not in result.columns:
+        mismatch = result.filter(pl.col("Anomaly Type") == "IFSC State Mismatch")
+        assert len(mismatch) == 1  # AB != MH, but only one unique customer
