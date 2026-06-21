@@ -210,3 +210,14 @@ async def restore_backup(request: Request):
             },
             status_code=500,
         )
+
+
+@router.get("/audit", response_class=HTMLResponse)
+async def audit_log_viewer(request: Request):
+    """Display audit log (read-only, login-required)."""
+    events = store.list_audit_events(limit=200)
+    return templates.TemplateResponse(
+        request=request,
+        name="audit_log.html",
+        context={"events": events},
+    )

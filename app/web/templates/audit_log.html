@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — SanGir Automations{% endblock %}
+{% block page_title %}Audit Log{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/settings" class="btn btn-ghost" style="margin-left:auto;">← Settings</a>
+{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <div class="card-title">Recent Events</div>
+  <div class="card-sub">Login, logout, run lifecycle, and system events (last 200)</div>
+
+  {% if events %}
+  <div style="margin-top:16px; overflow-x:auto;">
+    <table style="width:100%; font-size:12px; border-collapse:collapse;">
+      <thead style="background:var(--row-alt);">
+        <tr>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Timestamp</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Action</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">User</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Target</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px; border:1px solid var(--border); font-family:monospace; font-size:11px;">{{ event.ts }}</td>
+          <td style="padding:8px; border:1px solid var(--border);">
+            <span style="font-weight:600; {% if 'login' in event.action or 'started' in event.action %}color:var(--ok-text);{% elif 'failed' in event.action or 'cancelled' in event.action %}color:var(--err-text);{% elif 'logout' in event.action %}color:var(--muted);{% endif %}">
+              {{ event.action }}
+            </span>
+          </td>
+          <td style="padding:8px; border:1px solid var(--border); color:{% if event.username %}var(--text);{% else %}var(--muted);{% endif %}">
+            {{ event.username or "—" }}
+          </td>
+          <td style="padding:8px; border:1px solid var(--border); font-family:monospace; font-size:11px; color:var(--muted);">
+            {{ event.target or "—" }}
+          </td>
+          <td style="padding:8px; border:1px solid var(--border); font-size:11px; color:var(--muted);">
+            {{ event.detail or "—" }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="help-text" style="margin-top:12px;">
+    Showing the most recent 200 events. Older events are retained in the audit log table.
+  </div>
+  {% else %}
+  <div class="empty-state" style="margin-top:16px;">
+    <div style="font-size:14px; color:var(--muted);">No events recorded yet</div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
