@@ -14,6 +14,17 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from fcmr_core.analytics.cm_summary import (
+    generate_cluster_distribution,
+    generate_coapplicant_overlap,
+    generate_data_quality_summary,
+    generate_demographic_distribution,
+    generate_duplication_summary,
+    generate_geographic_distribution,
+    generate_kyc_completeness,
+    generate_lan_concentration,
+)
+from fcmr_core.catalog import store
 from fcmr_core.logging_setup import get_logger
 from fcmr_core.reporting.excel_style import (
     HEADER_FILL,
@@ -118,7 +129,7 @@ def build_workpaper(
     sample_records: list[dict],
     output_dir: Path,
 ) -> Path:
-    """Build a 5-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology).
+    """Build a 13-sheet Excel workpaper (Cover, Lead, Detailed, TOC/TOD, Methodology, + 8 CM Summaries).
 
     Args:
         engagement: Engagement dict from store.
@@ -197,6 +208,35 @@ def build_workpaper(
     _build_methodology_sheet(
         ws4, engagement, run, wide_csv_path, sample_records, title_font, subheader_font
     )
+
+    # ── Sheets 5-12: CM Summary Reports (if customer_master) ──
+    if upload and upload.get("report_type") == "customer_master":
+        try:
+            df = store.get_upload_df(upload["upload_id"])
+            if df is not None and not df.is_empty():
+                # All 8 summaries
+                summaries = [
+                    ("Geographic Distribution", generate_geographic_distribution(df)),
+                    ("KYC Completeness", generate_kyc_completeness(df)),
+                    ("Demographic Distribution", generate_demographic_distribution(df)),
+                    ("Duplication Summary", generate_duplication_summary(df)),
+                    ("Co-Applicant Overlap", generate_coapplicant_overlap(df)),
+                    ("Related-Party Clusters", generate_cluster_distribution(df)),
+                    ("Data Quality Summary", generate_data_quality_summary(df)),
+                    ("LAN Concentration", generate_lan_concentration(df)),
+                ]
+                for title, summary_df in summaries:
+                    if (
+                        summary_df
+                        and not summary_df.is_empty()
+                        and "note" not in summary_df.columns
+                    ):
+                        ws = wb.create_sheet(title)
+                        _write_summary_sheet(
+                            ws, title, summary_df, header_fill, header_font, border
+                        )
+        except Exception:
+            pass  # Silently skip summaries if there's an error
 
     # Save
     wb.save(workpaper_path)
@@ -837,3 +877,38 @@ def _build_methodology_sheet(
     ws.column_dimensions["B"].width = 40
     ws.column_dimensions["C"].width = 16
     ws.column_dimensions["D"].width = 22
+
+
+def _write_summary_sheet(ws, title: str, df: pl.DataFrame, header_fill, header_font, border):
+    """Write a summary report sheet (one of 8 CM summaries).
+
+    Args:
+        ws: openpyxl worksheet
+        title: Sheet title (used for display)
+        df: Polars DataFrame with the summary data
+        header_fill: Header fill color
+        header_font: Header font
+        border: Border style
+    """
+    # Write header row
+    columns = df.columns
+    for col_idx, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name.replace("_", " ").title())
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = border
+
+    # Write data rows
+    for row_idx, row in enumerate(df.to_dicts(), 2):
+        for col_idx, col_name in enumerate(columns, 1):
+            value = row.get(col_name)
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = border
+            # Right-align numeric columns
+            if isinstance(value, (int, float)):
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    # Freeze header and auto-size columns
+    freeze_header(ws)
+    auto_column_widths(ws)
