@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -221,3 +221,87 @@ async def audit_log_viewer(request: Request):
         name="audit_log.html",
         context={"events": events},
     )
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def user_management_page(request: Request):
+    """User management page (admin-only)."""
+    username = request.session.get("username")
+    user = store.get_user(username) if username else None
+
+    # Gate: admin-only
+    if not user or user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    users = store.list_users()
+    return templates.TemplateResponse(
+        request=request,
+        name="user_management.html",
+        context={"users": users},
+    )
+
+
+@router.post("/users/add")
+async def add_user(request: Request, username: str = Form(...), display_name: str = Form(...)):
+    """Add a new user (admin-only)."""
+    from fcmr_core.security import hash_password
+
+    # Gate: admin-only
+    current_user = store.get_user(request.session.get("username", ""))
+    if not current_user or current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    username = username.strip().lower()
+    display_name = display_name.strip()
+
+    # Validate
+    if not username or not display_name:
+        users = store.list_users()
+        return templates.TemplateResponse(
+            request=request,
+            name="user_management.html",
+            context={
+                "users": users,
+                "message": "✗ Username and display name are required",
+            },
+            status_code=400,
+        )
+
+    # Check if user exists
+    if store.get_user(username):
+        users = store.list_users()
+        return templates.TemplateResponse(
+            request=request,
+            name="user_management.html",
+            context={
+                "users": users,
+                "message": f"✗ User '{username}' already exists",
+            },
+            status_code=400,
+        )
+
+    # Create user with temporary password
+    temp_password = "TempPassword123!"
+    pwd_hash, salt = hash_password(temp_password)
+    try:
+        store.create_user(username, f"{salt}:{pwd_hash}", display_name)
+        users = store.list_users()
+        return templates.TemplateResponse(
+            request=request,
+            name="user_management.html",
+            context={
+                "users": users,
+                "message": f"✓ User '{username}' created with temporary password: {temp_password}",
+            },
+        )
+    except Exception as exc:
+        users = store.list_users()
+        return templates.TemplateResponse(
+            request=request,
+            name="user_management.html",
+            context={
+                "users": users,
+                "message": f"✗ Failed to create user: {exc}",
+            },
+            status_code=500,
+        )

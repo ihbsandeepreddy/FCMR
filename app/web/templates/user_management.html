@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}User Management — SanGir Automations{% endblock %}
+{% block page_title %}User Management{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/settings" class="btn btn-ghost" style="margin-left:auto;">← Settings</a>
+{% endblock %}
+
+{% block content %}
+
+{% if message %}
+<div class="notice" style="margin-bottom:16px; background:{% if '✓' in message %}var(--ok-bg);{% else %}var(--err-bg);{% endif %} border-left:4px solid {% if '✓' in message %}var(--ok-text);{% else %}var(--err-text);{% endif %}">
+  {{ message }}
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-title">Add New User</div>
+  <div class="card-sub">Create a new admin or regular user account</div>
+
+  <form method="POST" action="/users/add" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;">
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required pattern="[a-z0-9_]+" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;" placeholder="lowercase alphanumeric">
+      <div class="help-text" style="margin-top:4px; font-size:12px;">Lowercase letters, numbers, underscores only</div>
+    </div>
+
+    <div class="form-group">
+      <label for="display-name">Display Name</label>
+      <input type="text" id="display-name" name="display_name" required style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;" placeholder="e.g., John Smith">
+    </div>
+
+    <div style="display:flex; gap:10px;">
+      <button type="submit" class="btn btn-primary">Create User</button>
+      <button type="reset" class="btn btn-ghost">Clear</button>
+    </div>
+
+    <div class="help-text" style="font-size:11px; color:var(--muted); margin-top:8px;">
+      New users are created with a temporary password. They must change it on first login.
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Existing Users</div>
+  <div class="card-sub">Manage user roles and access</div>
+
+  {% if users %}
+  <div style="margin-top:16px; overflow-x:auto;">
+    <table style="width:100%; font-size:12px; border-collapse:collapse;">
+      <thead style="background:var(--row-alt);">
+        <tr>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Username</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Display Name</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Role</th>
+          <th style="text-align:left; padding:8px; border:1px solid var(--border);">Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:8px; border:1px solid var(--border); font-family:monospace; font-weight:600;">{{ user.username }}</td>
+          <td style="padding:8px; border:1px solid var(--border);">{{ user.display_name }}</td>
+          <td style="padding:8px; border:1px solid var(--border);">
+            <span style="background:{% if user.role == 'admin' %}var(--ok-bg);{% else %}var(--row-alt);{% endif %} padding:4px 8px; border-radius:4px; font-size:11px; font-weight:600;">
+              {{ user.role | upper }}
+            </span>
+          </td>
+          <td style="padding:8px; border:1px solid var(--border); font-size:11px; color:var(--muted);">{{ user.created_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state" style="margin-top:16px;">
+    <div style="font-size:14px; color:var(--muted);">No users found</div>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}
