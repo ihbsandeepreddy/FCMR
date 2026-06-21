@@ -125,8 +125,13 @@ class Settings(BaseSettings):
         if not self.version:
             self.version = _read_version()
 
-        # Resolve data_dir based on deployment environment
-        if _ON_VERCEL:
+        # Resolve data_dir based on deployment environment.
+        # An explicit FCMR_DATA_DIR override always wins (documented in .env.example;
+        # used for custom installs and isolated tests).
+        env_data_dir = os.environ.get("FCMR_DATA_DIR", "").strip()
+        if env_data_dir:
+            data_root = Path(env_data_dir).expanduser()
+        elif _ON_VERCEL:
             # On Vercel the filesystem is read-only except /tmp
             data_root = Path("/tmp/fcmr")
         elif getattr(sys, "frozen", False):

@@ -388,10 +388,14 @@ async def run_detail(request: Request, run_id: str):
 
     donut_svg = None
     bar_svg = None
+    lorenz_svg = None
+    kyc_svg = None
+    duplicates_svg = None
     summary = None
     ran_categories = None
     missing_summary = None
     cm_summaries = {}  # All 8 CM summary reports
+    cm_unavailable = []  # CM summaries that could not run (missing data)
     rules_run = []
     sibling_runs = []
 
@@ -446,43 +450,39 @@ async def run_detail(request: Request, run_id: str):
             bar_svg = build_bar_chart(top_exception_codes, width=700, height=400)
 
             # B5 Charts: Lorenz, KYC Completeness, Duplicates Pie
-            lorenz_svg = None
-            kyc_svg = None
-            duplicates_svg = None
+
+            # Lorenz curve of exception concentration — sourced from the WIDE CSV,
+            # which carries overall_status/exception_count (the raw upload table does
+            # not have those columns, which previously made this block always fail).
             try:
-                # Lorenz curve: cumulative exception distribution across customers
+                wide_df = pl.read_csv(wide_path, infer_schema_length=0)
+                if "exception_count" in wide_df.columns and "overall_status" in wide_df.columns:
+                    counts = (
+                        wide_df.filter(pl.col("overall_status") != "OK")
+                        .with_columns(
+                            pl.col("exception_count").cast(pl.Int64, strict=False).fill_null(0)
+                        )
+                        .filter(pl.col("exception_count") > 0)
+                        .sort("exception_count", descending=True)["exception_count"]
+                        .to_list()
+                    )
+                    total_exc = sum(counts)
+                    if total_exc > 0:
+                        cumulative = []
+                        running = 0
+                        for c in counts:
+                            running += c
+                            cumulative.append(running / total_exc * 100)
+                        lorenz_svg = build_lorenz_curve(cumulative)
+            except Exception:
+                pass  # Lorenz is best-effort
+
+            # KYC Completeness: field coverage % across the raw upload dataset.
+            try:
                 df = store.get_upload_df(run["upload_id"])
                 if df is not None and not df.is_empty():
-                    # Count exceptions per customer, sort descending, compute cumulative %
-                    exc_per_cust = (
-                        df.select(pl.col("customer_id"))
-                        .filter(pl.col("overall_status") != "OK")
-                        .group_by("customer_id")
-                        .agg(pl.count().alias("exc_count"))
-                        .sort("exc_count", descending=True)
-                        .select(pl.col("exc_count"))
-                    )
-                    if len(exc_per_cust) > 0:
-                        total_exc = exc_per_cust.select(pl.col("exc_count").sum())[0, 0]
-                        cumulative = []
-                        running_sum = 0
-                        for exc_count in exc_per_cust["exc_count"]:
-                            running_sum += exc_count
-                            cumulative.append(
-                                (running_sum / total_exc * 100) if total_exc > 0 else 0
-                            )
-                        lorenz_svg = build_lorenz_curve(cumulative)
-
-                    # KYC Completeness: field coverage % across dataset
                     field_coverage = {}
-                    for field in [
-                        "pan",
-                        "aadhaar",
-                        "mobile",
-                        "email",
-                        "dob",
-                        "voter_id",
-                    ]:
+                    for field in ["pan", "aadhaar", "mobile", "email", "dob", "voter_id"]:
                         if field in df.columns:
                             present = (
                                 df.filter(pl.col(field).is_not_null())
@@ -495,16 +495,15 @@ async def run_detail(request: Request, run_id: str):
                             field_coverage[field.upper()] = coverage
                     if field_coverage:
                         kyc_svg = build_kyc_completeness_bar(field_coverage)
-
-                    # Duplicates Pie: breakdown of duplicate types
-                    duplicate_types = {}
-                    for code in all_exception_codes.keys():
-                        if "DUPLICATE" in code:
-                            duplicate_types[code] = all_exception_codes[code]
-                    if duplicate_types:
-                        duplicates_svg = build_duplicates_pie(duplicate_types)
             except Exception:
-                pass  # Silently skip B5 charts if error
+                pass  # KYC chart is best-effort
+
+            # Duplicates pie: breakdown of duplicate exception types (from aggregates).
+            duplicate_types = {
+                code: n for code, n in all_exception_codes.items() if "DUPLICATE" in code
+            }
+            if duplicate_types:
+                duplicates_svg = build_duplicates_pie(duplicate_types)
 
             total = sum(status_counts.values())
             all_codes = [{"exception_code": c, "count": n} for c, n in all_exception_codes.items()]
