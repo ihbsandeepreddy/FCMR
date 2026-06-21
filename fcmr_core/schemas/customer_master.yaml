@@ -1,23 +1,32 @@
 # Column mapping for the Customer Master upload.
 # Keys = canonical field names used throughout fcmr_core.
 # Values = list of accepted header variations (case-insensitive, whitespace-stripped).
+#
+# Note: All columns are OPTIONAL except customer_id, full_name, and lan.
+# Missing columns are handled gracefully by rules/analytics (return notes or skip checks).
+# Auto-generated columns (ucid, fcmr_customer_key, fcmr_group_id) appear in outputs but
+# are not mapped from input (produced by beneficiary/ucid rules).
+#
 report_type: customer_master
 
 columns:
   customer_id:
-    aliases: [customer_id, cust_id, customerid, client_id, borrower_id]
+    aliases: [customer_id, cust_id, customerid, customer_code, cust_code, client_id, borrower_id, applicant_id, acct_id]
     required: true
     dtype: str
+    description: "Unique customer identifier; used for deduplication and grouping"
 
   full_name:
-    aliases: [full_name, customer_name, name, borrower_name, applicant_name]
+    aliases: [full_name, customer_name, name, borrower_name, applicant_name, first_name_last_name, customer_full_name, applicant_full_name]
     required: true
     dtype: str
+    description: "Customer name; validated for KYC completeness and used for name-based deduplication"
 
   dob:
-    aliases: [dob, date_of_birth, birth_date, dateofbirth]
+    aliases: [dob, date_of_birth, birth_date, dateofbirth, d.o.b, birthdate, age, date_birth]
     required: false
-    dtype: str   # kept as str; parsed in KYC rule
+    dtype: str
+    description: "Date of birth (YYYY-MM-DD or DD-MM-YYYY); validated for age range (18-65) and format"
 
   gender:
     aliases: [gender, sex]
@@ -35,19 +44,22 @@ columns:
     dtype: str
 
   pan:
-    aliases: [pan, pan_no, pan_number, permanent_account_number]
+    aliases: [pan, pan_no, pan_number, permanent_account_number, pan_id, taxpayer_id, pan_code]
     required: false
     dtype: str
+    description: "PAN (10-char format: AAAAA9999A); used for KYC validation and PAN-based deduplication"
 
   aadhaar:
-    aliases: [aadhaar, aadhaar_no, aadhaar_number, aadhar, aadhar_no, uid]
+    aliases: [aadhaar, aadhaar_no, aadhaar_number, aadhar, aadhar_no, uid, aadhar_id, aadhaar_id]
     required: false
     dtype: str
+    description: "Aadhaar (12 digits); hashed for deduplication, masked in outputs (XXXXXXXX####)"
 
   voter_id:
-    aliases: [voter_id, voter_id_no, epic_no, epic_number, voter_card]
+    aliases: [voter_id, voter_id_no, epic_no, epic_number, voter_card, voter_id, electoral_id]
     required: false
     dtype: str
+    description: "Voter ID / EPIC; used for KYC validation and duplicate detection"
 
   passport:
     aliases: [passport, passport_no, passport_number]
@@ -80,31 +92,37 @@ columns:
     dtype: str
 
   state:
-    aliases: [state, state_name]
+    aliases: [state, state_name, st, state_code, state_abbr]
     required: false
     dtype: str
+    description: "State/UT code (2-char: KA, MH, etc.); used for address validation and geographic analysis"
 
   pincode:
-    aliases: [pincode, pin_code, pin, postal_code, zip, zipcode]
+    aliases: [pincode, pin_code, pin, postal_code, zip, zipcode, postal_pin, pincode_no]
     required: false
     dtype: str
+    description: "6-digit postal code; validated against India Post PIN master; required for address completeness"
 
   bank_account:
-    aliases: [bank_account, bank_account_no, account_no, account_number, bank_acc]
+    aliases: [bank_account, bank_account_no, account_no, account_number, bank_acc, account, bank_account_number]
     required: false
     dtype: str
+    description: "Bank account number (9-18 digits); validated for length and used for duplicate detection"
 
   ifsc:
-    aliases: [ifsc, ifsc_code, bank_ifsc]
+    aliases: [ifsc, ifsc_code, bank_ifsc, ifsc_code_branch, micr_code]
     required: false
     dtype: str
+    description: "IFSC bank code; used for state validation against bank IFSC registry"
 
   lan:
-    aliases: [lan, loan_agreement_number, loan_account_no, loan_id, loan_no, account_no_loan]
+    aliases: [lan, loan_agreement_number, loan_account_no, loan_id, loan_no, account_no_loan, lan, loan_account_number]
     required: true
     dtype: str
+    description: "Loan Account Number; distinguishes multiple loans per customer; required for UCID deduplication"
 
   coapplicant_mobile:
-    aliases: [co_applicant_mobile, coapplicant_phone, coapp_mobile, guarantor_mobile, coapplicant_contact]
+    aliases: [co_applicant_mobile, coapplicant_phone, coapp_mobile, guarantor_mobile, coapplicant_contact, co_applicant_phone, coapp_contact]
     required: false
     dtype: str
+    description: "Co-applicant/guarantor phone; used for concentration analysis (multiple loans under guarantor)"
