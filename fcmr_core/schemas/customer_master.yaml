@@ -126,3 +126,30 @@ columns:
     required: false
     dtype: str
     description: "Co-applicant/guarantor phone; used for concentration analysis (multiple loans under guarantor)"
+
+  # --- Optional fields enabling catalogue-grounded forensic analytics ---------
+  # These are not required; the analytics that consume them are NOT_RUN-guarded
+  # and report "field not available" gracefully when the column is absent.
+  income:
+    aliases: [income, declared_income, monthly_income, annual_income, gross_income, net_income, salary, income_amount]
+    required: false
+    dtype: str   # kept str; cast to numeric inside Benford analytic
+    description: "Declared income; feeds Benford's Law deviation test (CM-DQ-07)"
+
+  branch_code:
+    aliases: [branch_code, branch, branch_id, branch_name, branch_no]
+    required: false
+    dtype: str
+    description: "Originating branch; segments missing-KYC and onboarding-velocity analytics (CM-DQ-09, CM-ID-03)"
+
+  dsa_code:
+    aliases: [dsa_code, dsa, dsa_id, dsa_name, agent_code, sourcing_agent, channel_code]
+    required: false
+    dtype: str
+    description: "DSA / sourcing channel; segments missing-KYC and onboarding-velocity analytics (CM-DQ-09, CM-ID-03)"
+
+  onboarding_date:
+    aliases: [onboarding_date, application_date, creation_date, customer_creation_date, kyc_date, sourcing_date, onboard_date]
+    required: false
+    dtype: str   # parsed inside the velocity analytic
+    description: "Customer onboarding/application date; feeds onboarding-velocity spike detection (CM-ID-03)"

@@ -48,7 +48,7 @@ Two distinct capabilities live in the app:
 
 | Capability | Input report type | What it does |
 |---|---|---|
-| **KYC / data-quality analytics** | `customer_master` | Runs the 31-rule deterministic pipeline → wide/long exception CSVs, dashboard charts, ICAI-sampled 5-sheet Excel workpaper. |
+| **KYC / data-quality analytics** | `customer_master` | Runs the 31-rule deterministic pipeline → wide/long exception CSVs, dashboard charts, ICAI-sampled 5-sheet Excel workpaper. The run-detail page also surfaces 8 statutory CM summary reports plus **7 catalogue-grounded forensic analytics** (`fcmr_core/analytics/cm_catalogue.py`) mapped to the NBFC Audit Analytics Catalogue (CM-DQ-06/07/09/10, CM-ID-01/03/04 — see §6.5). |
 | **Multi-file consolidation & EAD analytics** | any report type + `ead_files` | Multi-file/folder uploads are merged into one source at ingest time, with a guided schema-reconciliation step when layouts differ (§9); the consolidated source is mapped/analyzed/downloaded like any upload. For `ead_files` (39 ECL/EAD columns), a dedicated analytics engine runs 13 pure-Polars reports (stage mismatch, negative checks, provision checks, etc.) with workbook export, dashboard, and backend routes (`/ead/*`). |
 
 Other report types (`collection_report`, `disbursement_report`, `technical_writeoff`) have
@@ -372,6 +372,36 @@ the three `_exc_*` columns, ensure the module is imported in `_ensure_rules_load
 test. If it produces a new exception code, also register its **severity** in
 `sampling/stratification.py::_SEVERITY_MAP` and (optionally) a color in `reporting/charts.py`
 and a source-doc label in `reporting/workpaper.py`.
+
+### 6.5 Catalogue-grounded forensic analytics (`analytics/cm_catalogue.py`)
+
+Beyond the 31-rule pipeline and the 8 statutory CM summaries, the run-detail page renders a
+**Forensic Analytics** section driven by `CATALOGUE_ANALYTICS` — 7 analytics mapped to the
+**NBFC Audit Analytics Catalogue** (Brahmayya & Co.). All are pure Polars, deterministic
+(stdlib `difflib` only — invariant #1), and **missing-column-safe**: each returns a `note`
+DataFrame ("not available") that the UI shows as a NOT_RUN notice instead of erroring.
+
+| Catalogue ID | Analytic | Needs (beyond core CM fields) |
+|---|---|---|
+| CM-DQ-10 | Address clustering (borrower density > N at one normalized address) | `address_line1` |
+| CM-ID-01 | Name-similarity clusters (difflib ≥ 0.92, blocked by pincode, differing PAN) | `full_name` |
+| CM-ID-04 | Email-domain anomalies (disposable list + over-shared domains) | `email` |
+| CM-DQ-06 | Sequential/templated KYC document numbers (runs of ≥3 consecutive) | any of pan/aadhaar/voter_id/passport/driving_licence |
+| CM-DQ-07 | Benford's Law first-digit test on declared income (MAD verdict) | **`income`** (optional col) |
+| CM-DQ-09 | Missing-KYC null-rate by branch/DSA (flag > 2× portfolio avg) | **`branch_code`** or **`dsa_code`** |
+| CM-ID-03 | Onboarding-velocity spikes per branch/DSA (> mean + 3σ/day) | **`onboarding_date`** + branch/dsa |
+
+The last three need the **optional canonical columns** added to `customer_master.yaml`
+(`income`, `branch_code`, `dsa_code`, `onboarding_date`) — all non-required, additive
+(invariant #4). **Deferred** (need datasets the auditor does not upload here): CM-DQ-05
+employee–customer overlap (needs HR master) and CM-ID-02 PEP/sanctions screening (needs an
+external list). Wired into the run-detail page via `app/api/runs.py` (loops
+`CATALOGUE_ANALYTICS` into the `cm_catalogue` context) → `run_detail.html`. Tested in
+`tests/test_cm_catalogue.py` (detection + NOT_RUN paths for all 7).
+
+**To add another catalogue analytic:** write a pure-Polars, column-safe `generate_*(df)` in
+`cm_catalogue.py`, append it to `CATALOGUE_ANALYTICS`, add a test. UI/route pick it up
+automatically (no template change needed).
 
 ---
 

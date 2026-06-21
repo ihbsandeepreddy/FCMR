@@ -19,6 +19,7 @@ from fcmr_core.analytics.cm_analytics import (
     generate_coapplicant_concentration,
     generate_fraud_risk_flags,
 )
+from fcmr_core.analytics.cm_catalogue import CATALOGUE_ANALYTICS
 from fcmr_core.analytics.cm_summary import (
     generate_cluster_distribution,
     generate_coapplicant_overlap,
@@ -436,6 +437,7 @@ async def run_detail(request: Request, run_id: str):
     missing_summary = None
     cm_summaries = {}  # All 8 CM summary reports
     cm_unavailable = []  # CM summaries that could not run (missing data)
+    cm_catalogue = []  # Catalogue-grounded forensic analytics (CM-DQ/CM-ID)
     rules_run = []
     sibling_runs = []
 
@@ -734,6 +736,35 @@ async def run_detail(request: Request, run_id: str):
                                     "data": bank_anomalies.to_dicts(),
                                     "columns": bank_anomalies.columns,
                                 }
+                        # Catalogue-grounded forensic analytics (CM-DQ-06/07/09/10, CM-ID-01/03/04)
+                        for key, title, cid, fn in CATALOGUE_ANALYTICS:
+                            try:
+                                res = fn(df)
+                            except Exception:
+                                continue
+                            if res is None or res.is_empty():
+                                continue
+                            if "note" in res.columns:
+                                cm_catalogue.append(
+                                    {
+                                        "key": key,
+                                        "title": title,
+                                        "catalogue_id": cid,
+                                        "available": False,
+                                        "reason": res[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_catalogue.append(
+                                    {
+                                        "key": key,
+                                        "title": title,
+                                        "catalogue_id": cid,
+                                        "available": True,
+                                        "data": res.to_dicts(),
+                                        "columns": res.columns,
+                                    }
+                                )
             except Exception:
                 cm_summaries = {}
 
@@ -752,6 +783,7 @@ async def run_detail(request: Request, run_id: str):
             "missing_summary": missing_summary,
             "cm_summaries": cm_summaries,
             "cm_unavailable": cm_unavailable,
+            "cm_catalogue": cm_catalogue,
             "rules_run": rules_run,
             "sibling_runs": sibling_runs,
         },

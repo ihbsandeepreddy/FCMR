@@ -435,6 +435,44 @@
 </div>
 {% endfor %}
 
+{# Catalogue-grounded forensic analytics (CM-DQ / CM-ID) #}
+{% if cm_catalogue %}
+<div class="page-header" style="margin:24px 0 8px;">
+  <h2 style="font-family:'Lora',serif; font-size:18px; margin:0;">Forensic Analytics</h2>
+  <p class="card-sub" style="margin:2px 0 0;">NBFC Audit Analytics Catalogue — identity, KYC &amp; data-integrity fraud signals. Deterministic; calibrate thresholds to Board-approved policy.</p>
+</div>
+{% for item in cm_catalogue %}
+<div class="card" style="padding:0; overflow:hidden; margin-bottom:16px;">
+  <div style="padding:16px 20px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px;">
+    <span class="badge badge-type mono">{{ item.catalogue_id }}</span>
+    <div class="card-title" style="margin-bottom:0;">{{ item.title }}</div>
+  </div>
+  {% if item.available %}
+  <div style="max-height:600px; overflow-y:auto; border-bottom:1px solid var(--border);">
+    <table class="data-table" style="margin-bottom:0;">
+      <thead style="position:sticky; top:0; background:var(--bg); z-index:1;">
+        <tr>
+          {% for col in item.columns %}<th>{{ col }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in item.data %}
+        <tr>
+          {% for col in item.columns %}<td>{{ row[col] if row[col] is not none else "—" }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div style="padding:14px 20px;">
+    <span class="notice notice-warn" style="display:inline-block;">Not available — {{ item.reason }}</span>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
 {# Downloads #}
 <div class="card">
   <div class="card-title">Download Results</div>
