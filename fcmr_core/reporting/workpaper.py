@@ -47,17 +47,36 @@ def _procedures_performed(run: dict, long_csv_path: Path) -> list[dict]:
             for rule_id in cat["rule_ids"]:
                 category_map[rule_id] = cat["label"]
 
-        # Read long CSV and count exceptions per rule
+        # Read long CSV once; derive counts + severities from single pass
         try:
-            long_df = pl.read_csv(
-                long_csv_path, columns=["rule_id", "status"], infer_schema_length=0
-            )
+            long_df = pl.read_csv(long_csv_path, infer_schema_length=0)
+
+            # Exception counts per rule (filter to non-OK, group, count)
             exception_counts = (
                 long_df.filter(pl.col("status") != "OK").group_by("rule_id").len().to_dicts()
             )
             exc_map = {d["rule_id"]: d["len"] for d in exception_counts}
+
+            # Severity per rule: collect unique codes per rule, map to severity
+            rule_codes_agg = (
+                long_df.group_by("rule_id")
+                .agg(pl.col("exception_code").unique())
+                .to_dicts()
+            )
+            severity_map = {}
+            sev_order = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "LOW": 0}
+            for item in rule_codes_agg:
+                rule_id = item["rule_id"]
+                codes = item["exception_code"]
+                if codes:
+                    severities = [_SEVERITY_MAP.get(code, "LOW") for code in codes]
+                    severity = max(severities, key=lambda s: sev_order.get(s, 0))
+                else:
+                    severity = "—"
+                severity_map[rule_id] = severity
         except Exception:
             exc_map = {}
+            severity_map = {}
 
         # Build procedures list
         procedures = []
@@ -65,22 +84,7 @@ def _procedures_performed(run: dict, long_csv_path: Path) -> list[dict]:
             rule_id = rule_meta.rule_id
             category = category_map.get(rule_id, "—")
             exceptions = exc_map.get(rule_id, 0)
-
-            # Severity: lookup highest severity code seen for this rule
-            severity = "—"
-            try:
-                long_df_rule = pl.read_csv(long_csv_path, infer_schema_length=0)
-                rule_codes = (
-                    long_df_rule.filter(pl.col("rule_id") == rule_id)["exception_code"]
-                    .unique()
-                    .to_list()
-                )
-                severities = [_SEVERITY_MAP.get(code, "LOW") for code in rule_codes]
-                sev_order = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "LOW": 0}
-                if severities:
-                    severity = max(severities, key=lambda s: sev_order.get(s, 0))
-            except Exception:
-                severity = "—"
+            severity = severity_map.get(rule_id, "—")
 
             procedures.append(
                 {
@@ -505,33 +509,28 @@ def _build_detailed_exceptions_sheet(ws, wide_csv_path, header_fill, header_font
     try:
         df = pl.read_csv(wide_csv_path, infer_schema_length=0)
 
-        # Mask Aadhaar: replace raw Aadhaar values with masked form XXXXXXXX + last 4 chars
+        # Mask Aadhaar (vectorized): replace with XXXXXXXX + last 4 chars
         for col_name in df.columns:
             if "aadhaar" in col_name.lower() or "aadhar" in col_name.lower():
-
-                def mask_aadhaar(val):
-                    if val and isinstance(val, str) and len(val) >= 4:
-                        return "XXXXXXXX" + val[-4:]
-                    return val
-
                 df = df.with_columns(
-                    pl.col(col_name).map_elements(mask_aadhaar, return_dtype=pl.Utf8)
+                    pl.when(pl.col(col_name).str.len_chars() >= 4)
+                    .then(pl.lit("XXXXXXXX") + pl.col(col_name).str.slice(-4))
+                    .otherwise(pl.col(col_name))
+                    .alias(col_name)
                 )
 
         # Keep ALL columns (wide format: all original + summary columns)
         col_names = df.columns
 
-        # Headers
+        # Header row with styling
         for col_idx, col_name in enumerate(col_names, 1):
             cell = ws.cell(row=1, column=col_idx, value=col_name)
             cell.fill = header_fill
             cell.font = header_font
 
-        # Data rows
-        for row_idx, row_vals in enumerate(df.rows(), 2):
-            for col_idx, value in enumerate(row_vals, 1):
-                cell = ws.cell(row=row_idx, column=col_idx, value=value)
-                cell.border = border
+        # Data rows via batch append (no per-cell borders; much faster for large sheets)
+        for row_vals in df.iter_rows(allow_na=True):
+            ws.append(row_vals)
 
         # Freeze top row and enable autofilter
         ws.freeze_panes = "A2"

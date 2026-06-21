@@ -160,6 +160,54 @@ async def run_status(run_id: str):
     )
 
 
+def _build_workpaper_background(run_id: str, upload: dict) -> None:
+    """Pre-generate workpaper after analytics completes (best-effort background task)."""
+    run = store.get_run(run_id)
+    if not run or run["status"] != "completed" or not run.get("wide_csv") or not run.get("long_csv"):
+        return
+
+    engagement_id = run.get("engagement_id") or "default"
+    engagement = store.get_engagement(engagement_id)
+    if not engagement:
+        engagement = {
+            "engagement_id": engagement_id,
+            "name": "Audit Engagement",
+            "client_name": "—",
+            "period_from": None,
+            "period_to": None,
+        }
+
+    wide_path = Path(run["wide_csv"])
+    long_path = Path(run["long_csv"])
+    if not wide_path.exists() or not long_path.exists():
+        return
+
+    df = pl.read_csv(wide_path, infer_schema_length=0)
+    population = len(df)
+    exception_count = df.get_column("overall_status").ne("OK").sum()
+
+    sample_records = select_sample(
+        wide_path,
+        engagement_id=engagement_id,
+        run_id=run_id,
+        population=population,
+        exception_count=exception_count,
+    )
+
+    workpaper_path = build_workpaper(
+        engagement=engagement,
+        run=run,
+        upload=upload,
+        wide_csv_path=wide_path,
+        long_csv_path=long_path,
+        sample_records=sample_records,
+        output_dir=settings.outputs_dir / run_id,
+    )
+
+    store.update_run(run_id, workpaper_path=str(workpaper_path))
+    logger.info("workpaper_prebuilt run_id=%s path=%s", run_id, workpaper_path.name)
+
+
 def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = None) -> None:
     """Execute the full analytics pipeline and update the catalog when done."""
     import json
@@ -239,6 +287,12 @@ def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = Non
             progress_step="Done",
             progress_pct=100,
         )
+
+        # Pre-generate workpaper in background (best-effort; on failure, download builds on-demand)
+        try:
+            _build_workpaper_background(run_id, upload)
+        except Exception as exc:
+            logger.warning("workpaper_prebuild_failed run_id=%s error=%s", run_id, str(exc))
     except _RunCancelled:
         _cancel_requests.discard(run_id)
         store.update_run(run_id, status="cancelled", finished_at=_now(), error="Stopped by user.")
@@ -452,10 +506,24 @@ async def export_workpaper(run_id: str, dl_token: str | None = Query(None)):
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
 
+    # Serve cached workpaper if present on disk
+    if run.get("workpaper_path"):
+        cached_path = Path(run["workpaper_path"])
+        if cached_path.exists():
+            headers = {}
+            if dl_token:
+                headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+            return FileResponse(
+                cached_path,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=cached_path.name,
+                headers=headers,
+            )
+
     try:
         df = pl.read_csv(wide_path, infer_schema_length=0)
         population = len(df)
-        exception_count = sum(1 for val in df["overall_status"] if val != "OK")
+        exception_count = df.get_column("overall_status").ne("OK").sum()
 
         # Use resolved engagement_id (fallback to "default" if missing)
         resolved_engagement_id = engagement_id or "default"
