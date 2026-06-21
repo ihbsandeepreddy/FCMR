@@ -193,12 +193,12 @@ def test_run_pipeline_progress_callback():
 
 def test_methodology_icfr_table_run_all():
     """Verify Methodology ICFR table includes all 5 categories on run-all."""
-    import json
     import tempfile
     from pathlib import Path
 
-    from fcmr_core.reporting.workpaper import build_workpaper
     from openpyxl import load_workbook
+
+    from fcmr_core.reporting.workpaper import build_workpaper
 
     # Synthetic minimal CSVs
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -266,15 +266,13 @@ def test_methodology_icfr_table_run_all():
                 continue
             if in_icfr and row[0] and not row[0].startswith("Category"):
                 # Stop when we hit a non-header row outside the table
-                if (
-                    row[0] not in [
-                        "Missing Data",
-                        "KYC & Document Format",
-                        "Address & PIN",
-                        "Duplicate Detection",
-                        "Identity Grouping (UCID + Beneficiary)",
-                    ]
-                ):
+                if row[0] not in [
+                    "Missing Data",
+                    "KYC & Document Format",
+                    "Address & PIN",
+                    "Duplicate Detection",
+                    "Identity Grouping (UCID + Beneficiary)",
+                ]:
                     break
                 icfr_labels.append(row[0])
 
@@ -293,8 +291,9 @@ def test_methodology_icfr_table_filtered():
     import tempfile
     from pathlib import Path
 
-    from fcmr_core.reporting.workpaper import build_workpaper
     from openpyxl import load_workbook
+
+    from fcmr_core.reporting.workpaper import build_workpaper
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -323,15 +322,17 @@ def test_methodology_icfr_table_filtered():
         run = {
             "run_id": "RUN002",
             "upload_id": "UPLOAD002",
-            "selected_rules": json.dumps([
-                "pan_duplicate",
-                "aadhaar_duplicate",
-                "mobile_duplicate",
-                "bank_account_duplicate",
-                "name_dob_duplicate",
-                "voter_id_duplicate",
-                "address_duplicate",
-            ]),
+            "selected_rules": json.dumps(
+                [
+                    "pan_duplicate",
+                    "aadhaar_duplicate",
+                    "mobile_duplicate",
+                    "bank_account_duplicate",
+                    "name_dob_duplicate",
+                    "voter_id_duplicate",
+                    "address_duplicate",
+                ]
+            ),
         }
 
         upload = {
