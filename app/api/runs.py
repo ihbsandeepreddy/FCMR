@@ -47,7 +47,13 @@ from fcmr_core.reporting.charts import (
     build_lorenz_curve,
 )
 from fcmr_core.reporting.workpaper import build_workpaper
-from fcmr_core.rules.registry import list_categories, resolve_rule_ids, run_pipeline
+from fcmr_core.rules.registry import (
+    _ensure_rules_loaded,
+    list_categories,
+    list_rules,
+    resolve_rule_ids,
+    run_pipeline,
+)
 from fcmr_core.sampling.sample import select_sample
 
 logger = get_logger("processing")
@@ -67,16 +73,30 @@ templates = Jinja2Templates(directory=str(_templates_dir))
 
 
 def _resolve_run_selection(
-    mode: str, categories: list[str] | None, rules: list[str] | None
+    mode: str,
+    categories: list[str] | None,
+    rules: list[str] | None,
+    disabled: list[str] | None = None,
 ) -> list[str] | None:
     """Resolve the run's rule selection, validating before any run row is created.
 
-    Returns None for "run all"; otherwise a non-empty rule_ids list. Raises a 400
-    when "Run Selected" is requested with nothing checked (resolve returns None),
-    so a phantom "running" run is never created for an empty selection.
+    Returns None for "run all" (with no engagement-disabled rules); otherwise a
+    non-empty rule_ids list. Rules disabled for the engagement are always removed
+    from the effective set so deselected categories never execute or appear in
+    output. Raises 400 when the effective selection is empty.
     """
+    disabled_set = set(disabled or [])
     if mode == "all":
-        return None
+        if not disabled_set:
+            return None
+        _ensure_rules_loaded()
+        remaining = [m.rule_id for m in list_rules() if m.rule_id not in disabled_set]
+        if not remaining:
+            raise HTTPException(
+                status_code=400, detail="All rules are disabled for this engagement."
+            )
+        return remaining
+
     rule_ids = resolve_rule_ids(categories or [], rules or [])
     if rule_ids is None:
         raise HTTPException(
@@ -86,7 +106,13 @@ def _resolve_run_selection(
                 "click 'Run Selected', or click 'Run All Rules'."
             ),
         )
-    return rule_ids
+    remaining = [r for r in rule_ids if r not in disabled_set]
+    if not remaining:
+        raise HTTPException(
+            status_code=400,
+            detail="Every selected rule is disabled for this engagement.",
+        )
+    return remaining
 
 
 @router.get("/runs", response_class=HTMLResponse)
@@ -97,6 +123,7 @@ async def runs_list(request: Request):
     all_uploads = store.list_uploads(engagement_id=engagement_id) if engagement_id else []
     ready_uploads = [u for u in all_uploads if u["status"] == "ready"]
     categories = list_categories()
+    disabled_rules = store.get_disabled_rules(engagement_id) if engagement_id else []
     return templates.TemplateResponse(
         request=request,
         name="runs_list.html",
@@ -105,6 +132,7 @@ async def runs_list(request: Request):
             "has_running": has_running,
             "ready_uploads": ready_uploads,
             "categories": categories,
+            "disabled_rules": disabled_rules,
         },
     )
 
@@ -124,10 +152,12 @@ async def runs_start(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
-    # Validate selection BEFORE creating the run (no orphaned "running" run on 400)
-    rule_ids = _resolve_run_selection(mode, categories, rules)
-
+    # Validate selection BEFORE creating the run (no orphaned "running" run on 400).
+    # Engagement-disabled rules are subtracted from the effective set.
     engagement_id = request.session.get("engagement_id")
+    disabled = store.get_disabled_rules(engagement_id) if engagement_id else []
+    rule_ids = _resolve_run_selection(mode, categories, rules, disabled)
+
     username = request.session.get("username")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
@@ -162,8 +192,10 @@ async def start_run(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
-    # Validate selection BEFORE creating the run (no orphaned "running" run on 400)
-    rule_ids = _resolve_run_selection(mode, categories, rules)
+    # Validate selection BEFORE creating the run (no orphaned "running" run on 400).
+    engagement_id = request.session.get("engagement_id")
+    disabled = store.get_disabled_rules(engagement_id) if engagement_id else []
+    rule_ids = _resolve_run_selection(mode, categories, rules, disabled)
     logger.info(
         "start_run mode=%s upload_id=%s categories=%s rules=%s resolved=%s",
         mode,
@@ -173,7 +205,6 @@ async def start_run(
         rule_ids,
     )
 
-    engagement_id = request.session.get("engagement_id")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
     if rule_ids is not None:

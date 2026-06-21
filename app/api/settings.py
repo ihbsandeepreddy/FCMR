@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.backup import create_backup, list_backups
@@ -44,6 +44,22 @@ async def update_setting(request: Request):
         name="settings.html",
         context={"settings": store.list_settings(), "message": f"✓ Setting '{key}' updated"},
     )
+
+
+@router.post("/settings/disabled-rules")
+async def update_disabled_rules(request: Request):
+    """Persist the set of rule IDs to skip for the active engagement.
+
+    Posted from the run page. Without an active engagement there is nothing to scope
+    the setting to, so redirect to the engagement picker.
+    """
+    engagement_id = request.session.get("engagement_id")
+    if not engagement_id:
+        return RedirectResponse("/", status_code=303)
+    form = await request.form()
+    rule_ids = [r for r in form.getlist("disabled_rules") if r]
+    store.set_disabled_rules(engagement_id, rule_ids)
+    return RedirectResponse("/runs", status_code=303)
 
 
 @router.get("/settings/backup")

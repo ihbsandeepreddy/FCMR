@@ -35,3 +35,37 @@ def test_disabled_rules_filter_logic():
     assert "pan_format" not in filtered_ids, "Disabled rule should not be in filtered list"
     assert "address_duplicate" not in filtered_ids, "Disabled rule should not be in filtered list"
     assert filtered_ids == ["aadhaar_format", "pan_duplicate", "ucid"], "Filtered list should match"
+
+
+def test_disabled_rules_store_roundtrip():
+    """C2: get_disabled_rules must return the stored list (previously crashed)."""
+    from fcmr_core.catalog import store
+
+    store.init_catalog()
+    eid = "test-engagement-disabled-rules"  # settings-keyed; no engagement row needed
+    assert store.get_disabled_rules(eid) == []  # default: none disabled
+    store.set_disabled_rules(eid, ["pan_format", "mobile_format"])
+    assert store.get_disabled_rules(eid) == ["pan_format", "mobile_format"]
+    store.set_disabled_rules(eid, [])  # clear
+    assert store.get_disabled_rules(eid) == []
+
+
+def test_resolve_run_selection_subtracts_disabled():
+    """The run pipeline must exclude engagement-disabled rules (B3 wiring)."""
+    import pytest
+    from fastapi import HTTPException
+
+    from app.api.runs import _resolve_run_selection
+
+    # "Run all" with a disabled rule => explicit list omitting it (not None).
+    res = _resolve_run_selection("all", None, None, disabled=["pan_format"])
+    assert res is not None and "pan_format" not in res
+
+    # Selected category minus a disabled rule.
+    res = _resolve_run_selection("selected", ["duplicates"], None, disabled=["pan_duplicate"])
+    assert "pan_duplicate" not in res
+    assert "aadhaar_duplicate" in res
+
+    # Every selected rule disabled => 400 (no empty run).
+    with pytest.raises(HTTPException):
+        _resolve_run_selection("selected", None, ["pan_format"], disabled=["pan_format"])

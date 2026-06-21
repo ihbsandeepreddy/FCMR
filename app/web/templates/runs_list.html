@@ -71,7 +71,9 @@
           <div style="display:flex; flex-direction:column; gap:4px; margin-left:12px;">
             {% for rule in cat.rules %}
             <label style="display:flex; align-items:center; cursor:pointer; font-size:11.5px; gap:6px;">
-              <input type="checkbox" name="disabled_rules" value="{{ rule.id }}" style="cursor:pointer;">
+              <input type="checkbox" name="disabled_rules" value="{{ rule.id }}" style="cursor:pointer;"
+                     aria-label="Disable rule: {{ rule.description }}"
+                     {% if rule.id in disabled_rules %}checked{% endif %}>
               {{ rule.description }}
             </label>
             {% endfor %}

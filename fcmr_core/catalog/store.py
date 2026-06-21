@@ -620,11 +620,12 @@ def get_disabled_rules(engagement_id: str) -> list[str]:
     import json
 
     key = f"disabled_rules:{engagement_id}"
-    setting = get_setting(key)
-    if not setting or not setting.get("value"):
+    raw = get_setting(key)  # get_setting returns the value string (or None)
+    if not raw:
         return []
     try:
-        return json.loads(setting["value"])
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
     except (json.JSONDecodeError, TypeError):
         return []
 
