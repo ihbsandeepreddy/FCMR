@@ -25,6 +25,28 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _ead_month_labels(raw_dates: list[str]) -> list[str]:
+    """Collapse raw date strings to distinct sorted 'MMM YYYY' labels."""
+    seen: dict[str, str] = {}  # YYYY-MM key -> display label
+    for raw in raw_dates:
+        raw = raw.strip()
+        dt = None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y", "%Y/%m/%d"):
+            try:
+                dt = datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                continue
+        if dt:
+            key = dt.strftime("%Y-%m")
+            seen[key] = dt.strftime("%b %Y")
+        else:
+            key = raw[:7] if len(raw) >= 7 else raw
+            if key not in seen:
+                seen[key] = raw
+    return [seen[k] for k in sorted(seen)]
+
+
 router = APIRouter()
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
@@ -445,6 +467,11 @@ async def upload_detail(request: Request, upload_id: str):
     engagement_id = request.session.get("engagement_id")
     ead_runs = store.list_ead_runs(engagement_id) if engagement_id else []
 
+    # Months covered — only meaningful for ready EAD uploads with business_date mapped
+    ead_months: list[str] = []
+    if upload.get("report_type") == "ead_files" and upload.get("status") == "ready":
+        ead_months = _ead_month_labels(store.get_ead_months(upload_id))
+
     return templates.TemplateResponse(
         request=request,
         name="upload_detail.html",
@@ -455,6 +482,7 @@ async def upload_detail(request: Request, upload_id: str):
             "source_files": source_files,
             "categories": categories,
             "ead_runs": ead_runs,
+            "ead_months": ead_months,
         },
     )
 

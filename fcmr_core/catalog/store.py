@@ -342,6 +342,24 @@ def get_upload_df(upload_id: str):
         return con.execute(f"SELECT * FROM {table}").pl()
 
 
+def get_ead_months(upload_id: str) -> list[str]:
+    """Return distinct business_date values from an EAD upload, sorted ascending.
+
+    Returns raw strings as stored; the caller formats them for display.
+    Returns [] if the column is absent or the table doesn't exist.
+    """
+    table = f"data_{upload_id.replace('-', '_')}"
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                f'SELECT DISTINCT business_date FROM "{table}" '
+                f"WHERE business_date IS NOT NULL ORDER BY business_date"
+            ).fetchall()
+        return [str(r[0]) for r in rows if r[0]]
+    except Exception:
+        return []
+
+
 def copy_upload_to_csv(upload_id: str, out_path: str) -> None:
     """Write the upload's data directly to *out_path* via DuckDB COPY TO.
 
