@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from fcmr_core.catalog import store
-from fcmr_core.rules.registry import list_rules, resolve_rule_ids
+from fcmr_core.rules.registry import list_rules
 
 
 def test_disabled_rules_empty_returns_all():

@@ -59,6 +59,30 @@
     </div>
   </form>
 
+  <div class="card" style="background:var(--row-alt); margin-top:16px;">
+    <div class="card-title" style="font-size:13px; margin-bottom:8px;">Disable Rules for This Engagement</div>
+    <div class="card-sub" style="font-size:12px; margin-bottom:12px;">Rules checked below will be skipped on every run in this engagement.</div>
+
+    <form method="POST" action="/settings/disabled-rules" style="display:flex; flex-direction:column; gap:8px;">
+      <div style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:8px;">
+        {% for cat in categories %}
+        <div style="margin-bottom:10px;">
+          <div style="font-weight:500; font-size:12px; margin-bottom:4px; color:var(--fg);">{{ cat.label }}</div>
+          <div style="display:flex; flex-direction:column; gap:4px; margin-left:12px;">
+            {% for rule in cat.rules %}
+            <label style="display:flex; align-items:center; cursor:pointer; font-size:11.5px; gap:6px;">
+              <input type="checkbox" name="disabled_rules" value="{{ rule.id }}" style="cursor:pointer;">
+              {{ rule.description }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn btn-primary" style="align-self:flex-start;">Save Disabled Rules</button>
+    </form>
+  </div>
+
   <script>
     // Auto-switch to "Run Selected" when user checks any category/rule
     const catCheckboxes = document.querySelectorAll('input[name="categories"], input[name="rules"]');
