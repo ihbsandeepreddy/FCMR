@@ -67,6 +67,9 @@ a = Analysis(
         "anyio.abc",
         "anyio._backends._asyncio",
         "starlette.middleware.sessions",
+        # SessionMiddleware signs cookies with itsdangerous, imported lazily inside
+        # Starlette — PyInstaller's static analysis can miss it.
+        "itsdangerous",
         # stdlib extras sometimes missed by PyInstaller
         "email.mime.text",
         "email.mime.multipart",

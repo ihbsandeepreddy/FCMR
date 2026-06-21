@@ -60,9 +60,12 @@ async function spawnBackend() {
   writeLog(`Using port ${BACKEND_PORT}`);
 
   const isDev = !app.isPackaged;
+  // Platform-aware backend executable name (PyInstaller drops the .exe on mac/Linux).
+  const exeName =
+    process.platform === "win32" ? "sangir-backend.exe" : "sangir-backend";
   const backendExe = isDev
     ? "python"
-    : path.join(process.resourcesPath, "sangir-backend", "sangir-backend.exe");
+    : path.join(process.resourcesPath, "sangir-backend", exeName);
 
   // On Windows, kill any orphaned backend exe to clear a stale catalog.duckdb lock
   if (process.platform === "win32" && !isDev) {
