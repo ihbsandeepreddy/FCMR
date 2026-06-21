@@ -543,6 +543,41 @@ def update_password(username: str, password_hash: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rule Configuration (per-engagement disabled rules)
+# ---------------------------------------------------------------------------
+
+
+def get_disabled_rules(engagement_id: str) -> list[str]:
+    """Get list of disabled rule IDs for an engagement.
+
+    Returns empty list if no rules are disabled (default: all enabled).
+    """
+    import json
+
+    key = f"disabled_rules:{engagement_id}"
+    setting = get_setting(key)
+    if not setting or not setting.get("value"):
+        return []
+    try:
+        return json.loads(setting["value"])
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def set_disabled_rules(engagement_id: str, rule_ids: list[str]) -> None:
+    """Set the list of disabled rule IDs for an engagement.
+
+    Stores as JSON in the settings table with key 'disabled_rules:<engagement_id>'.
+    Pass an empty list to enable all rules.
+    """
+    import json
+
+    key = f"disabled_rules:{engagement_id}"
+    value = json.dumps(rule_ids) if rule_ids else "[]"
+    set_setting(key, value)
+
+
+# ---------------------------------------------------------------------------
 # Engagement CRUD
 # ---------------------------------------------------------------------------
 

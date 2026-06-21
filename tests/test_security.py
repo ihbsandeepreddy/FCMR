@@ -52,3 +52,11 @@ def test_store_update_password_exists():
     # Simple check that the function exists and is callable
     assert hasattr(store, "update_password"), "store should have update_password helper"
     assert callable(store.update_password), "update_password should be callable"
+
+
+def test_disabled_rules_helpers_exist():
+    """Verify disabled-rules helpers exist and are callable."""
+    assert hasattr(store, "get_disabled_rules"), "store should have get_disabled_rules"
+    assert hasattr(store, "set_disabled_rules"), "store should have set_disabled_rules"
+    assert callable(store.get_disabled_rules), "get_disabled_rules should be callable"
+    assert callable(store.set_disabled_rules), "set_disabled_rules should be callable"
