@@ -45,6 +45,7 @@ from fcmr_core.reporting.excel_style import (
     auto_column_widths,
     freeze_header,
 )
+from fcmr_core.reporting.source_docs import CATEGORY_SOURCE_DOCS
 from fcmr_core.rules.registry import CATEGORIES, list_rules
 from fcmr_core.sampling.stratification import _SEVERITY_MAP
 
@@ -923,45 +924,8 @@ def _build_methodology_sheet(
         cell.font = Font(bold=True, color="FFFFFF", size=11)
     row += 1
 
-    # Keyed by CATEGORIES id (single source of truth) → (display label, objective,
-    # assertion, standard). Order follows the registry's CATEGORIES order.
-    icfr_mappings = [
-        (
-            "missing_data",
-            "Missing Data",
-            "Mandatory KYC fields captured",
-            "Completeness",
-            "RBI KYC",
-        ),
-        (
-            "kyc_format",
-            "KYC & Document Format",
-            "Customer identity is valid & verifiable",
-            "Accuracy",
-            "RBI KYC / ICAI",
-        ),
-        (
-            "address_pin",
-            "Address & PIN",
-            "Address is complete & valid",
-            "Completeness",
-            "RBI KYC / ICAI",
-        ),
-        (
-            "duplicates",
-            "Duplicate Detection",
-            "No duplicate / fictitious customers",
-            "Existence",
-            "NFRA fraud indicators",
-        ),
-        (
-            "identity_grouping",
-            "Identity Grouping (UCID + Beneficiary)",
-            "Related parties identified",
-            "Existence",
-            "ICAI / NFRA",
-        ),
-    ]
+    # Import from shared source-doc registry (single source of truth)
+    icfr_mappings = CATEGORY_SOURCE_DOCS
 
     selected_cat_ids = _get_selected_category_ids(run)
     for cat_id, label, obj, assertion, standard in icfr_mappings:
