@@ -22,6 +22,9 @@ from fcmr_core.analytics.ead_summary import (
     generate_stage_distribution,
     generate_writeoff_recovery,
 )
+from fcmr_core.logging_setup import get_logger
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Column maps
@@ -828,8 +831,9 @@ def run_ead_analytics(
                 result.write_csv(str(csv_path))
                 paths[key] = csv_path
         except Exception as exc:  # noqa: BLE001
-            # One report failure must not abort the whole suite
-            reports[key] = pl.DataFrame({"error": [str(exc)]})
+            # One report failure must not abort the whole suite; log and continue
+            logger.warning(f"EAD report '{key}' failed: {exc}")
+            reports[key] = pl.DataFrame({"note": [f"Error: {exc}"]})
 
     # Compute 8 EAD summary reports
     summary_reports = [
@@ -851,10 +855,15 @@ def run_ead_analytics(
         ("data_quality_ead", generate_data_quality_summary_ead(df), "Data Quality Summary"),
     ]
     for key, result, label in summary_reports:
-        if result and not result.is_empty() and "note" not in result.columns:
-            reports[key] = result
-            if on_progress:
-                on_progress(total, total, f"Summary: {label}")
+        try:
+            if result and not result.is_empty() and "note" not in result.columns:
+                reports[key] = result
+                if on_progress:
+                    on_progress(total, total, f"Summary: {label}")
+        except Exception as exc:  # noqa: BLE001
+            # Summary report failure; log and skip
+            logger.warning(f"EAD summary '{key}' failed: {exc}")
+            reports[key] = pl.DataFrame({"note": [f"Error: {exc}"]})
 
     if on_progress:
         on_progress(total, total, "Building Excel workpaper")
