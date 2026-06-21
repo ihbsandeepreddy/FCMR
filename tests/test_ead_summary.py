@@ -140,6 +140,26 @@ def test_sanction_disbursement_variance():
     assert sanctioned == 225000
 
 
+def test_string_typed_numeric_columns_do_not_break_summaries():
+    """H2: string-typed numeric columns must summarise (cast), not error into 'note'."""
+    df = pl.DataFrame(
+        {
+            "loan_id": ["L001", "L002", "L003"],
+            "stage": ["Stage 1", "Stage 2", "Stage 3"],
+            "ead": ["100000", "50000", "75000"],  # VARCHAR, not numeric
+            "total_provision": ["1000", "500", "750"],
+        }
+    )
+    stage = generate_stage_distribution(df)
+    assert "note" not in stage.columns
+    assert stage["Total EAD"].sum() == 225000.0
+
+    prov = generate_provision_coverage(df)
+    assert "note" not in prov.columns
+    total = prov.filter(pl.col("Coverage Type") == "Total Exposure")[0, "Amount"]
+    assert total == 225000.0
+
+
 def test_data_quality_summary_ead():
     """Test EAD data quality summary."""
     df = pl.DataFrame(

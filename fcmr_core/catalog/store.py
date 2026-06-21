@@ -320,10 +320,12 @@ def store_upload_data(upload_id: str, parquet_path: Path) -> None:
     """Import Parquet into DuckDB as a persistent table, then delete the file."""
     table = f"data_{upload_id.replace('-', '_')}"
     with _conn() as con:
-        con.execute(f"""
-            CREATE OR REPLACE TABLE {table} AS
-            SELECT * FROM read_parquet('{parquet_path.as_posix()}')
-        """)
+        # Bind the path as a parameter so a quote/backslash in it cannot break the SQL.
+        # (table is a UUID-derived identifier, so it cannot be parameterised but is safe.)
+        con.execute(
+            f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM read_parquet(?)",
+            [parquet_path.as_posix()],
+        )
     parquet_path.unlink(missing_ok=True)
     # Remove empty parent dir if present
     try:

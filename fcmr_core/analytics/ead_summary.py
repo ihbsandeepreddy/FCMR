@@ -18,7 +18,7 @@ def generate_portfolio_concentration(df: pl.DataFrame, top_n: int = 10) -> pl.Da
     top_customers = (
         df.group_by("loan_id")
         .agg(
-            pl.col("ead").sum().alias("Total EAD"),
+            pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"),
             pl.col("loan_id").count().alias("Loan Count"),
         )
         .sort("Total EAD", descending=True)
@@ -39,7 +39,7 @@ def generate_stage_distribution(df: pl.DataFrame) -> pl.DataFrame:
         df.group_by("stage")
         .agg(
             pl.col("loan_id").n_unique().alias("Loan Count"),
-            pl.col("ead").sum().alias("Total EAD"),
+            pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"),
         )
         .sort("Total EAD", descending=True)
     )
@@ -56,7 +56,7 @@ def generate_dpd_risk_distribution(df: pl.DataFrame) -> pl.DataFrame:
         df.group_by("dpd_bucket")
         .agg(
             pl.col("loan_id").n_unique().alias("Loan Count"),
-            pl.col("ead").sum().alias("Total EAD"),
+            pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"),
         )
         .sort("Total EAD", descending=True)
     )
@@ -69,10 +69,10 @@ def generate_collateral_coverage(df: pl.DataFrame) -> pl.DataFrame:
     if "collateral_value" not in df.columns or "ead" not in df.columns:
         return pl.DataFrame({"note": ["collateral_value and ead columns required"]})
 
-    total_ead = df.select(pl.col("ead").sum())[0, 0] or 0
+    total_ead = df.select(pl.col("ead").cast(pl.Float64, strict=False).sum())[0, 0] or 0
     covered = (
         df.filter(pl.col("collateral_value").is_not_null()).select(
-            pl.col("collateral_value").sum()
+            pl.col("collateral_value").cast(pl.Float64, strict=False).sum()
         )[0, 0]
         or 0
     )
@@ -98,8 +98,10 @@ def generate_provision_coverage(df: pl.DataFrame) -> pl.DataFrame:
     if "total_provision" not in df.columns or "ead" not in df.columns:
         return pl.DataFrame({"note": ["total_provision and ead columns required"]})
 
-    total_ead = df.select(pl.col("ead").sum())[0, 0] or 0
-    total_provision = df.select(pl.col("total_provision").sum())[0, 0] or 0
+    total_ead = df.select(pl.col("ead").cast(pl.Float64, strict=False).sum())[0, 0] or 0
+    total_provision = (
+        df.select(pl.col("total_provision").cast(pl.Float64, strict=False).sum())[0, 0] or 0
+    )
 
     pct_provided = (total_provision / total_ead * 100) if total_ead > 0 else 0
     uncovered = total_ead - total_provision
@@ -126,7 +128,7 @@ def generate_writeoff_recovery(df: pl.DataFrame) -> pl.DataFrame:
         df.group_by("written_off")
         .agg(
             pl.col("loan_id").n_unique().alias("Loan Count"),
-            pl.col("ead").sum().alias("Total EAD"),
+            pl.col("ead").cast(pl.Float64, strict=False).sum().alias("Total EAD"),
         )
         .sort("Total EAD", descending=True)
     )
@@ -140,14 +142,14 @@ def generate_sanction_disbursement_variance(df: pl.DataFrame) -> pl.DataFrame:
         return pl.DataFrame({"note": ["sanction_amount and disbursed_amount columns required"]})
 
     total_sanction = (
-        df.filter(pl.col("sanction_amount").is_not_null()).select(pl.col("sanction_amount").sum())[
-            0, 0
-        ]
+        df.filter(pl.col("sanction_amount").is_not_null()).select(
+            pl.col("sanction_amount").cast(pl.Float64, strict=False).sum()
+        )[0, 0]
         or 0
     )
     total_disbursed = (
         df.filter(pl.col("disbursed_amount").is_not_null()).select(
-            pl.col("disbursed_amount").sum()
+            pl.col("disbursed_amount").cast(pl.Float64, strict=False).sum()
         )[0, 0]
         or 0
     )
