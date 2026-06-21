@@ -598,7 +598,16 @@ def _build_detailed_exceptions_sheet(
         max_rows: Maximum rows to write (default 50,000); prevents OOM on large files
     """
     try:
+        if not Path(wide_csv_path).exists():
+            ws["A1"] = f"Exception data not available: {wide_csv_path}"
+            return
+
         df = pl.read_csv(wide_csv_path, infer_schema_length=0)
+
+        # Ensure overall_status column exists
+        if "overall_status" not in df.columns:
+            ws["A1"] = "overall_status column missing in exception data"
+            return
 
         # Filter to exception rows only (overall_status != "OK")
         exc_df = df.filter(pl.col("overall_status") != "OK")
@@ -633,11 +642,15 @@ def _build_detailed_exceptions_sheet(
             cell.fill = header_fill
             cell.font = header_font
 
-        # Data rows: prepend ref number, then original columns
-        for ref_num, row_vals in enumerate(exc_df.iter_rows(allow_na=True), 1):
-            ws.cell(row=ref_num + 1, column=1, value=ref_num)
-            for col_idx, val in enumerate(row_vals, 2):
-                ws.cell(row=ref_num + 1, column=col_idx, value=val)
+        # Data rows: prepend ref number, then original columns (if any exceptions)
+        if not exc_df.is_empty():
+            for ref_num, row_vals in enumerate(exc_df.iter_rows(allow_na=True), 1):
+                ws.cell(row=ref_num + 1, column=1, value=ref_num)
+                for col_idx, val in enumerate(row_vals, 2):
+                    ws.cell(row=ref_num + 1, column=col_idx, value=val)
+        else:
+            # No exception rows, but show a message below the header
+            ws.cell(row=2, column=1, value="No exceptions found (all records passed validation)")
 
         # Freeze top row and enable autofilter
         freeze_header(ws)
