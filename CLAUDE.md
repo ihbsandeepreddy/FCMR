@@ -39,8 +39,8 @@ Two distinct capabilities live in the app:
 
 | Capability | Input report type | What it does |
 |---|---|---|
-| **KYC / data-quality analytics** | `customer_master` | Runs the 24-rule deterministic pipeline → wide/long exception CSVs, dashboard charts, ICAI-sampled 4-sheet Excel workpaper. |
-| **Multi-file consolidation** | any report type | Multi-file/folder uploads are merged into one source at ingest time, with a guided schema-reconciliation step when layouts differ (§9); the consolidated source is mapped/analyzed/downloaded like any upload. Used heavily for `ead_files` (39 ECL/EAD columns), no rules run there. |
+| **KYC / data-quality analytics** | `customer_master` | Runs the 31-rule deterministic pipeline → wide/long exception CSVs, dashboard charts, ICAI-sampled 5-sheet Excel workpaper. |
+| **Multi-file consolidation & EAD analytics** | any report type + `ead_files` | Multi-file/folder uploads are merged into one source at ingest time, with a guided schema-reconciliation step when layouts differ (§9); the consolidated source is mapped/analyzed/downloaded like any upload. For `ead_files` (39 ECL/EAD columns), a dedicated analytics engine runs 13 pure-Polars reports (stage mismatch, negative checks, provision checks, etc.) with workbook export, dashboard, and backend routes (`/ead/*`). |
 
 Other report types (`collection_report`, `disbursement_report`, `technical_writeoff`) have
 schemas for ingestion/mapping but **no dedicated analytics yet** — they ingest and store, and
@@ -168,7 +168,7 @@ FCMR/
 │   │   ├── ead_files.yaml        39 canonical ECL/EAD fields (L&T Finance LMS names)
 │   │   ├── collection_report.yaml / disbursement_report.yaml / technical_writeoff.yaml
 │   │   └── loader.py             SchemaMap, alias index, difflib scoring, threshold
-│   ├── rules/                    24 deterministic rules grouped into 4 categories (see §6)
+│   ├── rules/                    31 deterministic rules grouped into 5 categories (see §6)
 │   │   ├── registry.py           @register, CATEGORIES, run_pipeline(), list_categories(),
 │   │   │                          resolve_rule_ids(), _coerce_str_columns()
 │   │   ├── ucid.py               Union-find grouping + KYC-consistency flag
@@ -182,7 +182,8 @@ FCMR/
 │   │   ├── builder.py            Wide + long exception CSVs
 │   │   ├── aggregation.py        Status counts, top exception codes
 │   │   ├── charts.py             SVG donut + horizontal bar
-│   │   └── workpaper.py          4-sheet Excel (Lead / Detailed / TOC-TOD / Methodology)
+│   │   ├── excel_style.py        Shared house style (header fill/font, borders, frozen panes, number formats)
+│   │   └── workpaper.py          5-sheet Excel (Cover / Lead / Detailed Exceptions / TOC-TOD / Methodology)
 │   ├── sampling/
 │   │   ├── stratification.py     Severity strata (CRITICAL/HIGH/MEDIUM/LOW)
 │   │   ├── icai_table.py         ICAI-ICFR attribute sample-size table (95% conf)
@@ -224,7 +225,7 @@ store_upload_data(): import Parquet into DuckDB table `data_<upload_id>`; DELETE
    │   (mapping saved as a reusable profile keyed by SHA256(sorted headers))
 status=ready
    │
-Run ──► background task: get_upload_df() (Polars) → run_pipeline() (24 rules) →
+Run ──► background task: get_upload_df() (Polars) → run_pipeline() (31 rules) →
         build_exception_csvs() → data/outputs/<run_id>/{wide,long}.csv → status=completed
    │
 Run detail page: donut + bar SVG, summary
@@ -297,8 +298,8 @@ score ≥ the configurable `fuzzy_match_threshold` (default **0.6**, editable at
 
 | report_type | Required fields | Purpose | Analytics? |
 |---|---|---|---|
-| `customer_master` | `customer_id`, `full_name`, `lan` | KYC master; full 24-rule pipeline | ✅ rules |
-| `ead_files` | `loan_id` | 39 ECL/EAD columns (DrsPOS, DPDBucketing, EAD, provisions…) | merge/consolidate only |
+| `customer_master` | `customer_id`, `full_name`, `lan` | KYC master; full 31-rule pipeline | ✅ rules |
+| `ead_files` | `loan_id` | 39 ECL/EAD columns (DrsPOS, DPDBucketing, EAD, provisions…); 13 pure-Polars reports | ✅ EAD analytics |
 | `collection_report` | `loan_account_no` | collections | ingest only |
 | `disbursement_report` | `loan_account_no`, `disbursement_date` | disbursements | ingest only |
 | `technical_writeoff` | `loan_account_no` | write-offs | ingest only |
@@ -323,19 +324,20 @@ reload) → it appears in the upload dropdown automatically. If it needs analyti
   `_exc_<rule_id>_code`, `_exc_<rule_id>_desc`. `reporting/builder.py` collapses these.
 - Rules are loaded once on first run via `_ensure_rules_loaded()` (import side effects).
 
-**Rule categories** — the 24 rules are grouped into 4 categories (defined in `CATEGORIES`
+**Rule categories** — the 31 rules are grouped into 5 categories (defined in `CATEGORIES`
 in `registry.py`). Users can run a whole category or individual rules from the run UI:
 
 | Category id | Label | Rule ids (count) |
 |---|---|---|
+| `missing_data` | Missing Data | pan_missing, aadhaar_missing, voter_id_missing, mobile_missing, email_missing, dob_missing, pin_missing, address_completeness **(8)** |
 | `kyc_format` | KYC & Document Format | pan_format, aadhaar_format, voter_id_format, passport_format, dl_format, mobile_format, email_format, dob_validity, dob_age_range, bank_account_invalid_length, email_company_generic_domain **(11)** |
-| `address_pin` | Address & PIN | pincode_exists, state_pin_match, district_pin_match, address_completeness **(4)** |
+| `address_pin` | Address & PIN | pincode_exists, state_pin_match, district_pin_match **(3)** |
 | `duplicates` | Duplicate Detection | pan_duplicate, aadhaar_duplicate, mobile_duplicate, bank_account_duplicate, name_dob_duplicate, voter_id_duplicate, address_duplicate **(7)** |
-| `identity_grouping` | Identity Grouping | ucid, beneficiary_tagging **(2)** |
+| `identity_grouping` | Identity Grouping (UCID + Beneficiary) | ucid, beneficiary_tagging **(2)** |
 
 `list_categories()` returns these enriched with descriptions. `resolve_rule_ids(category_ids, rule_ids)` merges category selection with individual rule selection → a flat list; returns `None` (= run all) when both are empty.
 
-**The 24 registered rules** (count is authoritative — older docs said 27):
+**The 31 registered rules** (count is authoritative — earlier docs said 24):
 
 | Module | rule_id(s) | Severity of findings |
 |---|---|---|
@@ -382,9 +384,10 @@ codes) — pure string-built SVG, no libraries.
 
 ## 8. Sampling & Excel workpaper
 
-For `customer_master` runs, **Export Workpaper** produces a 4-sheet `.xlsx`:
+For `customer_master` runs, **Export Workpaper** produces a 5-sheet `.xlsx`:
 
-1. **Lead Sheet** — engagement info, OK/WARN/ERROR breakdown, top exception codes with mapped
+1. **Cover Sheet** — engagement info, audit scope, workpaper reference
+2. **Lead Sheet** — OK/WARN/ERROR breakdown, procedures performed, top exception codes with mapped
    source document + compliance point.
 2. **Detailed Exceptions** — `customer_id`, status, count, codes, descriptions.
 3. **TOC/TOD** — the sampled rows with blank `Tested_By / Date / Sign_Off` columns and a
@@ -672,6 +675,7 @@ server-rendered.
 | **Catalog connection closed on shutdown** (v0.1.30) | Graceful release of DuckDB single-writer lock; allows Electron to reap orphaned processes | Call `store.close_catalog()` in lifespan shutdown + signal handlers on desktop |
 | **Catalog connect is bounded/fails-fast** (v0.1.31) | `duckdb.connect()` is wrapped with a ~15s timeout + retry; fails fast with a logged error instead of hanging indefinitely when the catalog is locked | Always log lock errors clearly; desktop backend self-heals via orphan reap + retry on lock |
 | **Process lifecycle: clean exit on close** (v0.1.31) | `start.bat` drops `--reload` (single process); Electron uses tree-kill on Windows; browser users get "Quit" button at `/settings` → `POST /api/system/shutdown`. Ensures backend cleanup, memory release, catalog lock release on all close paths | Single durable process model (no orphans); graceful shutdown via `store.close_catalog()` then `os._exit(0)` |
+| **Shared house-style utility** (`excel_style.py`) | Both CM and EAD workbooks use identical styling (headers, borders, fonts, number formats, frozen panes); centralized in one module | All workbook changes route through `excel_style` helpers; never hard-code styles in individual sheets |
 
 ---
 
@@ -711,5 +715,5 @@ what changed:
 - **LAN** — Loan Account Number; distinguishes legitimate same-person-multiple-loan rows.
 - **Wide / Long CSV** — per-record vs per-exception output shapes.
 - **EAD** — Exposure At Default (ECL/Ind AS 109 context); `ead_files` is the consolidation flow.
-- **Workpaper** — the 4-sheet Excel audit deliverable with the sampled, sign-off-ready rows.
+- **Workpaper** — the 5-sheet Excel audit deliverable (Cover, Lead, Detailed Exceptions, TOC-TOD, Methodology) with the sampled, sign-off-ready rows.
 ```
