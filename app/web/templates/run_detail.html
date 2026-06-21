@@ -257,6 +257,30 @@
 </div>
 {% endif %}
 
+{# B5 Best-Practice Charts: Lorenz, KYC Completeness, Duplicates #}
+{% if lorenz_svg or kyc_svg or duplicates_svg %}
+<div class="card" style="padding:20px; margin-bottom:16px;">
+  <div class="card-title" style="margin-bottom:16px;">Best-Practice Analytics Charts</div>
+  <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-start;">
+    {% if lorenz_svg %}
+    <div style="flex:0 0 380px; max-width:100%;">
+      {{ lorenz_svg | safe }}
+    </div>
+    {% endif %}
+    {% if kyc_svg %}
+    <div style="flex:1 1 450px; min-width:0;">
+      {{ kyc_svg | safe }}
+    </div>
+    {% endif %}
+    {% if duplicates_svg %}
+    <div style="flex:0 0 320px; max-width:100%;">
+      {{ duplicates_svg | safe }}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 {# Exception codes table — ALL codes (not just top 10) #}
 {% if summary.all_codes %}
 <div class="card" style="padding:0; overflow:hidden;">
