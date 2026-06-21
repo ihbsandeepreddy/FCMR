@@ -88,12 +88,16 @@ This backlog captures product work that is NOT in the current scope (Part A/B in
 
 ## 4. Performance & Scaling (P2–P3)
 
-### P2: UCID O(n²) Pairwise Matching
-**Problem:** UCID union-find does pairwise `_should_connect` check on all customer pairs.  
-**Impact:** Real ceiling ~tens of thousands; "5M-row" claim is not realistic.  
-**Effort:** High (keying/blocking before pairwise, union-find optimization)  
-**Risk:** Medium (core logic redesign)  
-**Workaround:** Document realistic row limits; alert if input > 100k rows.
+### P2: UCID Scaling Safety Cap (✅ O(n²) already optimized)
+**Status (v0.1.32):** The O(n²) nested-loop was replaced in v0.1.23 with:
+- O(n) hash grouping for exact-match fields (PAN, Aadhaar, Voter ID, Name+DOB, Bank Account)
+- Inverted-token address index for fuzzy matching (O(n × avg_tokens), capped at 500-row buckets)
+See `fcmr_core/rules/ucid.py` docstring for details.
+
+**Remaining work:** Add a safety cap + warning when input exceeds a threshold (e.g. 100k rows)
+to gracefully degrade or alert auditors. Golden test to lock behavior. *Not a redesign.*  
+**Effort:** Small (warning + cap logic)  
+**Risk:** Low (error handling only)
 
 ### P2: Address Duplicate O(n × avg_tokens) Index Scan
 **Problem:** Address dedup scans all candidate pairs; can be slow on large datasets.  

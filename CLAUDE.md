@@ -630,9 +630,11 @@ server-rendered.
 
 ## 18. Known limitations & scaling notes
 
-- **O(n²) hot spot: `ucid.py`** — pairwise `_should_connect` loop. The "5M-row" claim in
-  the old spec is **not realistic** for UCID. Real ceiling is ~tens of thousands of
-  `customer_master` rows. Future fix: blocking/keying before pairwise.
+- **UCID scaling (v0.1.32+): already optimized** — O(n) hash grouping for exact fields
+  (PAN, Aadhaar, Voter ID, Name+DOB, Bank Account) + inverted-token index for address fuzzy
+  matching (O(n × avg_tokens), capped at 500-row buckets). The old O(n²) nested loop is gone.
+  Real ceiling is still ~tens of thousands of `customer_master` rows (limited by address pair
+  work, not by hash operations). The "5M-row" claim in the old spec was never realistic.
 - **`address_duplicate` is now O(n × avg_tokens)** (fixed in v0.1.23): builds an inverted
   token index, filters candidate pairs sharing ≥3 tokens, skips buckets > 500 rows, then
   confirms only candidates with Jaccard ≥ 0.85. No longer a scaling concern for typical files.
