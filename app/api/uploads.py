@@ -120,8 +120,11 @@ async def do_upload(
         unified_columns,
     )
 
-    # Get engagement_id from session
+    # Get engagement_id from session. B2: an upload must belong to an engagement,
+    # else it is invisible in the dashboard (invariant #7) — send the user to pick one.
     engagement_id = request.session.get("engagement_id")
+    if not engagement_id:
+        return RedirectResponse(url="/", status_code=303)
     consolidate_on = consolidate not in ("", "off", "false", "0", None)
 
     # Filter out empty UploadFile stubs that browsers send for unselected inputs

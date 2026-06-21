@@ -152,10 +152,15 @@ async def runs_start(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
+    # B2: never create an orphaned run. Prefer the session engagement; fall back to
+    # the upload's own engagement so a run is always engagement-scoped (invariant #7).
+    engagement_id = request.session.get("engagement_id") or upload.get("engagement_id")
+    if not engagement_id:
+        return RedirectResponse(url="/", status_code=303)
+
     # Validate selection BEFORE creating the run (no orphaned "running" run on 400).
     # Engagement-disabled rules are subtracted from the effective set.
-    engagement_id = request.session.get("engagement_id")
-    disabled = store.get_disabled_rules(engagement_id) if engagement_id else []
+    disabled = store.get_disabled_rules(engagement_id)
     rule_ids = _resolve_run_selection(mode, categories, rules, disabled)
 
     username = request.session.get("username")
@@ -192,9 +197,13 @@ async def start_run(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
+    # B2: never create an orphaned run (see runs_start).
+    engagement_id = request.session.get("engagement_id") or upload.get("engagement_id")
+    if not engagement_id:
+        return RedirectResponse(url="/", status_code=303)
+
     # Validate selection BEFORE creating the run (no orphaned "running" run on 400).
-    engagement_id = request.session.get("engagement_id")
-    disabled = store.get_disabled_rules(engagement_id) if engagement_id else []
+    disabled = store.get_disabled_rules(engagement_id)
     rule_ids = _resolve_run_selection(mode, categories, rules, disabled)
     logger.info(
         "start_run mode=%s upload_id=%s categories=%s rules=%s resolved=%s",
