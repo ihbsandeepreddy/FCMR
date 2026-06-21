@@ -247,7 +247,10 @@
 <div class="card empty-state" style="padding:28px 24px;">
   <div class="empty-icon">📊</div>
   <h2>No EAD analytics runs yet</h2>
-  <p>Go to <a href="/dashboard/ead/consolidate">EAD Consolidate</a> and click <strong>Run EAD Analytics</strong>.</p>
+  <p>Run the EAD analytics engine over this engagement's ready EAD files.</p>
+  <form method="POST" action="/ead/analyze" style="margin-top:12px;">
+    <button type="submit" class="btn btn-primary" data-loading-text="Starting…">Run EAD Analytics</button>
+  </form>
 </div>
 {% endif %}
 
