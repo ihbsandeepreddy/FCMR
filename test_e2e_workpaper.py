@@ -86,7 +86,7 @@ def test_full_pipeline():
         )
 
         # Step 3: Load Parquet and run rules
-        print("[OK]Running 27-rule pipeline...")
+        print("[OK]Running rule pipeline...")
         df = pl.scan_parquet(parquet_path).collect()
         df_annotated = run_pipeline(df)
         print(f"  Pipeline output: {df_annotated.shape}")
@@ -135,7 +135,7 @@ def test_full_pipeline():
         assert len(sample) <= population, "Sample size exceeds population"
 
         # Step 8: Build workpaper (tests Excel sheet naming fix)
-        print("[OK]Building 4-sheet Excel workpaper...")
+        print("[OK]Building 5-sheet Excel workpaper...")
         engagement = {
             "engagement_id": "test-engagement",
             "name": "Test Audit",
@@ -143,8 +143,21 @@ def test_full_pipeline():
             "period_from": "2025-01-01",
             "period_to": "2025-12-31",
         }
-        run = {"run_id": "test-run", "engagement_id": "test-engagement"}
-        workpaper_path = build_workpaper(engagement, run, wide_path, sample, output_dir)
+        run = {
+            "run_id": "test-run",
+            "engagement_id": "test-engagement",
+            "upload_id": "test-upload",
+            "selected_rules": None,
+        }
+        upload = {
+            "upload_id": "test-upload",
+            "filename": "sample.csv",
+            "row_count": population,
+            "ingested_at": "2025-06-20T00:00:00",
+        }
+        workpaper_path = build_workpaper(
+            engagement, run, upload, wide_path, long_path, sample, output_dir
+        )
         print(f"  Workpaper: {workpaper_path.name}")
         assert workpaper_path.exists(), "Workpaper not created"
 
@@ -155,21 +168,42 @@ def test_full_pipeline():
         wb = load_workbook(workpaper_path)
         sheet_names = wb.sheetnames
         print(f"  Sheets: {sheet_names}")
-        expected_sheets = ["Lead Sheet", "Detailed Exceptions", "TOC and TOD", "Methodology"]
+        expected_sheets = [
+            "Cover",
+            "Lead Sheet",
+            "Detailed Exceptions",
+            "TOC and TOD",
+            "Methodology",
+        ]
         assert (
             sheet_names == expected_sheets
         ), f"Sheet names mismatch: {sheet_names} vs {expected_sheets}"
 
-        # Check Lead Sheet has content
+        # Check Cover sheet has W/P reference + tickmark legend
+        ws_cover = wb["Cover"]
+        cover_text = " ".join(str(c.value) for row in ws_cover.iter_rows() for c in row if c.value)
+        assert "W/P Reference" in cover_text, "Cover missing W/P Reference"
+        assert "Tickmark Legend" in cover_text, "Cover missing Tickmark Legend"
+
+        # Check Lead Sheet has content + Procedures Performed table
         ws_lead = wb["Lead Sheet"]
         print(f"  Lead Sheet: {ws_lead.max_row} rows")
         assert ws_lead.max_row > 5, "Lead Sheet is empty"
+        lead_text = " ".join(str(c.value) for row in ws_lead.iter_rows() for c in row if c.value)
+        assert "Procedures Performed" in lead_text, "Lead Sheet missing Procedures Performed"
 
-        # Check Detailed Exceptions sheet
+        # Check Detailed Exceptions sheet (wide: one row per customer + all columns)
         ws_exc = wb["Detailed Exceptions"]
         print(f"  Detailed Exceptions: {ws_exc.max_row} rows")
-        # Sheet has header + sampled rows, may be minimal if sample is small
-        assert ws_exc.max_row >= 1, "Exceptions sheet has no headers"
+        # Wide sheet = header + one row per input record
+        assert ws_exc.max_row >= population, "Detailed Exceptions not in wide (per-record) form"
+        # Aadhaar masking (invariant #2): no raw 12-digit Aadhaar must appear
+        import re as _re
+
+        exc_text = " ".join(str(c.value) for row in ws_exc.iter_rows() for c in row if c.value)
+        assert not _re.search(
+            r"\b\d{12}\b", exc_text
+        ), "Raw 12-digit Aadhaar leaked into Detailed Exceptions"
 
         # Check TOC and TOD (was "TOC/TOD", now fixed)
         ws_toc = wb["TOC and TOD"]
@@ -185,7 +219,7 @@ def test_full_pipeline():
         print(f"\n[OUTPUT] Outputs in: {output_dir}")
         print(f"   - wide.csv: {len(wide_df)} records")
         print(f"   - long.csv: {len(long_df)} exceptions")
-        print("   - workpaper.xlsx: 4 sheets")
+        print("   - workpaper.xlsx: 5 sheets")
 
 
 if __name__ == "__main__":

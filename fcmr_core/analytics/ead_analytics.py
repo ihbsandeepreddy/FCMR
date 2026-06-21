@@ -12,6 +12,20 @@ from pathlib import Path
 
 import polars as pl
 
+from fcmr_core.analytics.ead_summary import (
+    generate_collateral_coverage,
+    generate_data_quality_summary_ead,
+    generate_dpd_risk_distribution,
+    generate_portfolio_concentration,
+    generate_provision_coverage,
+    generate_sanction_disbursement_variance,
+    generate_stage_distribution,
+    generate_writeoff_recovery,
+)
+from fcmr_core.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 # ---------------------------------------------------------------------------
 # Column maps
 # ---------------------------------------------------------------------------
@@ -673,11 +687,23 @@ _REPORT_SHEET_NAMES: list[tuple[str, str]] = [
     ("negative_check", "Negative Values"),
     ("stage_mismatch", "Stage Mismatch"),
     ("fvtpl", "FVTPL Split"),
+    # EAD Summary Reports (8 audit-focused summaries)
+    ("portfolio_concentration", "Portfolio Concentration"),
+    ("stage_distribution", "Stage Distribution"),
+    ("dpd_risk_distribution", "DPD/Risk Distribution"),
+    ("collateral_coverage", "Collateral Coverage"),
+    ("provision_coverage", "Provision Coverage"),
+    ("writeoff_recovery", "Write-off & Recovery"),
+    ("sanction_disbursement", "Sanction vs Disbursement"),
+    ("data_quality_ead", "Data Quality Summary"),
 ]
 
 
 def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> None:
-    """Write a Polars DataFrame to an openpyxl worksheet."""
+    """Write a Polars DataFrame to an openpyxl worksheet.
+
+    Preserves numeric types so Excel can format them (₹, %, etc).
+    """
     from openpyxl.styles import Alignment
     from openpyxl.utils import get_column_letter
 
@@ -688,8 +714,28 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    str_df = df.with_columns([pl.col(c).cast(pl.Utf8, strict=False) for c in cols])
-    for ri, row in enumerate(str_df.rows(), 2):
+    # Preserve numeric types (so Excel keeps them right-aligned & summable);
+    # cast everything else to string. Covers signed + unsigned ints and floats.
+    _numeric_dtypes = (
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
+    )
+    casts = [
+        pl.col(col).cast(pl.Utf8, strict=False)
+        for col in cols
+        if df[col].dtype not in _numeric_dtypes
+    ]
+    df_for_write = df.with_columns(casts) if casts else df
+
+    for ri, row in enumerate(df_for_write.rows(), 2):
         for ci, val in enumerate(row, 1):
             cell = ws.cell(
                 row=ri, column=ci, value=val if val not in (None, "None", "null") else None
@@ -705,13 +751,18 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
 
 
 def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> None:
-    """Write all 13 EAD reports into one multi-sheet Excel workpaper."""
+    """Write all 13 EAD reports into one multi-sheet Excel workpaper.
+
+    Uses shared house-style colors and fonts from excel_style module.
+    """
     import openpyxl
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Font
+
+    from fcmr_core.reporting.excel_style import HEADER_FILL, HEADER_FONT
 
     wb = openpyxl.Workbook()
-    header_fill = PatternFill(start_color="5C3D1E", end_color="5C3D1E", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=10)
+    header_fill = HEADER_FILL
+    header_font = HEADER_FONT
     data_font = Font(size=10)
 
     first = True
@@ -780,11 +831,42 @@ def run_ead_analytics(
                 result.write_csv(str(csv_path))
                 paths[key] = csv_path
         except Exception as exc:  # noqa: BLE001
-            # One report failure must not abort the whole suite
-            reports[key] = pl.DataFrame({"error": [str(exc)]})
+            # One report failure must not abort the whole suite; log and continue
+            logger.warning(f"EAD report '{key}' failed: {exc}")
+            reports[key] = pl.DataFrame({"note": [f"Error: {exc}"]})
+
+    # Compute 8 EAD summary reports
+    summary_reports = [
+        (
+            "portfolio_concentration",
+            generate_portfolio_concentration(df),
+            "Portfolio Concentration",
+        ),
+        ("stage_distribution", generate_stage_distribution(df), "Stage Distribution"),
+        ("dpd_risk_distribution", generate_dpd_risk_distribution(df), "DPD/Risk Distribution"),
+        ("collateral_coverage", generate_collateral_coverage(df), "Collateral Coverage"),
+        ("provision_coverage", generate_provision_coverage(df), "Provision Coverage"),
+        ("writeoff_recovery", generate_writeoff_recovery(df), "Write-off & Recovery"),
+        (
+            "sanction_disbursement",
+            generate_sanction_disbursement_variance(df),
+            "Sanction vs Disbursement",
+        ),
+        ("data_quality_ead", generate_data_quality_summary_ead(df), "Data Quality Summary"),
+    ]
+    for key, result, label in summary_reports:
+        try:
+            if result and not result.is_empty() and "note" not in result.columns:
+                reports[key] = result
+                if on_progress:
+                    on_progress(total, total, f"Summary: {label}")
+        except Exception as exc:  # noqa: BLE001
+            # Summary report failure; log and skip
+            logger.warning(f"EAD summary '{key}' failed: {exc}")
+            reports[key] = pl.DataFrame({"note": [f"Error: {exc}"]})
 
     if on_progress:
-        on_progress(total - 1, total, "Building Excel workpaper")
+        on_progress(total, total, "Building Excel workpaper")
 
     workpaper_path = output_dir / "ead_workpaper.xlsx"
     try:

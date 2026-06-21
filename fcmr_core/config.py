@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     # Session secret for signed cookies; persisted in data/ so sessions survive restarts
     session_secret: str = ""
 
+    # Session idle timeout in minutes (0 = disabled)
+    session_idle_minutes: int = 480  # 8 hours default
+
     # Application version (read from package.json)
     version: str = ""
 

@@ -18,10 +18,6 @@
     <div class="sidebar-logo">
       <img src="/static/img/sangir-logo.png" alt="SanGir Automations" class="sidebar-logo-img">
     </div>
-    <div class="sidebar-branding">
-      <div class="sidebar-title">SanGir Automations</div>
-      <div class="sidebar-version">v{{ request.state.app_version }}</div>
-    </div>
 
     <nav class="sidebar-nav">
 
@@ -124,7 +120,7 @@
   </div>
 
   <script>
-  window.FCMRLoading = {
+  window.SanGirLoading = {
     overlay: function(msg) {
       var overlay = document.getElementById('app-loading-overlay');
       var msgEl = document.getElementById('app-loading-msg');
@@ -159,7 +155,7 @@
     document.querySelectorAll('a[data-loading-overlay]').forEach(function(link) {
       link.addEventListener('click', function(e) {
         var msg = this.getAttribute('data-loading-overlay');
-        window.FCMRLoading.overlay(msg);
+        window.SanGirLoading.overlay(msg);
       });
     });
 
@@ -174,7 +170,7 @@
         var sep = href.indexOf('?') !== -1 ? '&' : '?';
         this.href = href + sep + 'dl_token=' + token;
 
-        window.FCMRLoading.overlay(msg);
+        window.SanGirLoading.overlay(msg);
 
         // Poll for download cookie
         var pollCount = 0;
@@ -183,11 +179,11 @@
           if (document.cookie.indexOf('dl_done_' + token) !== -1) {
             clearInterval(pollInterval);
             document.cookie = 'dl_done_' + token + '; path=/; max-age=0';
-            window.FCMRLoading.hide();
+            window.SanGirLoading.hide();
           }
           if (pollCount > 50) { // ~20s timeout
             clearInterval(pollInterval);
-            window.FCMRLoading.hide();
+            window.SanGirLoading.hide();
           }
         }, 400);
       });

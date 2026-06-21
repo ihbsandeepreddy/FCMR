@@ -44,6 +44,42 @@ def create_backup() -> Path:
     return backup_file
 
 
+def list_backups() -> list[dict]:
+    """List all available backups in the backups directory.
+
+    Returns:
+        List of dicts with keys: filename, path, size_mb, created_at (ISO format).
+        Sorted by creation time, newest first.
+    """
+    settings.ensure_dirs()
+    backups = []
+
+    if not settings.backups_dir.exists():
+        return backups
+
+    for backup_file in sorted(settings.backups_dir.glob("SAND_Backup_*.zip"), reverse=True):
+        size_mb = backup_file.stat().st_size / (1024 * 1024)
+        # Parse timestamp from filename: SAND_Backup_YYYYMMDD_HHMMSS.zip
+        try:
+            timestamp_part = backup_file.stem.replace("SAND_Backup_", "")
+            # Convert YYYYMMDD_HHMMSS to ISO format (basic parsing)
+            date_part, time_part = timestamp_part.split("_")
+            iso_time = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}T{time_part[:2]}:{time_part[2:4]}:{time_part[4:6]}Z"
+        except (ValueError, IndexError):
+            iso_time = "unknown"
+
+        backups.append(
+            {
+                "filename": backup_file.name,
+                "path": str(backup_file),
+                "size_mb": round(size_mb, 2),
+                "created_at": iso_time,
+            }
+        )
+
+    return backups
+
+
 def restore_backup(backup_zip_path: Path) -> None:
     """Restore data from a backup zip.
 

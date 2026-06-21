@@ -1,6 +1,7 @@
 """SanGir Automations — FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -77,7 +78,7 @@ class DownloadCookieMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         dl_token = request.query_params.get("dl_token")
-        if dl_token and response.headers.get("content-disposition", "").startswith("attachment"):
+        if dl_token and response.status_code == 200:
             response.set_cookie(f"dl_done_{dl_token}", value="1", path="/", max_age=20)
         return response
 
@@ -97,7 +98,33 @@ class LoginRequiredMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+# Session idle timeout middleware
+class SessionIdleMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if settings.session_idle_minutes > 0 and "username" in request.session:
+            now = datetime.now(UTC)
+            last_seen = request.session.get("_last_seen")
+
+            # Initialize or check idle timeout
+            if last_seen:
+                try:
+                    last_seen_dt = datetime.fromisoformat(last_seen)
+                    idle_delta = now - last_seen_dt
+                    if idle_delta > timedelta(minutes=settings.session_idle_minutes):
+                        # Session expired; clear it
+                        request.session.clear()
+                        return RedirectResponse(url="/login", status_code=303)
+                except (ValueError, TypeError):
+                    pass  # Invalid timestamp, proceed anyway
+
+            # Update last_seen
+            request.session["_last_seen"] = now.isoformat()
+
+        return await call_next(request)
+
+
 # Add middlewares in reverse order (last added = innermost = runs first)
+app.add_middleware(SessionIdleMiddleware)
 app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret)
 app.add_middleware(VersionMiddleware)

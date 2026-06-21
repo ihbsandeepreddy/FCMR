@@ -40,11 +40,12 @@ async def dashboard(request: Request):
     # Scope uploads to active engagement
     engagement_id = request.session.get("engagement_id")
     uploads = store.list_uploads(engagement_id=engagement_id) if engagement_id else []
+    run_summaries = store.get_run_summaries_by_upload(engagement_id) if engagement_id else {}
     report_types = available_report_types()
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"uploads": uploads, "report_types": report_types},
+        context={"uploads": uploads, "run_summaries": run_summaries, "report_types": report_types},
     )
 
 
@@ -167,6 +168,7 @@ async def do_upload(
 
         # ── Single file, or consolidation disabled: one upload per file (legacy) ──
         if len(processed_files) == 1 or not consolidate_on:
+            last_upload_id = None
             for filename, content in processed_files:
                 upload_id = store.create_upload(
                     report_type, filename, batch_id=batch_id, engagement_id=engagement_id
@@ -175,6 +177,12 @@ async def do_upload(
                 _write_chunked(content, csv_path)
                 headers = sniff_headers(csv_path)
                 store.set_mapping_pending(upload_id, csv_path=csv_path, sniffed_headers=headers)
+                last_upload_id = upload_id
+            # Single file → go straight to column mapping; multi-file (no-consolidate) → dashboard
+            if len(processed_files) == 1 and last_upload_id:
+                return RedirectResponse(
+                    url=f"/dashboard/uploads/{last_upload_id}/map-columns", status_code=303
+                )
             return RedirectResponse(url="/dashboard", status_code=303)
 
         # ── Multi-file consolidation: stage raws into a batch dir, group by layout ──

@@ -4,7 +4,7 @@ import io
 from pathlib import Path
 
 import polars as pl
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -17,7 +17,7 @@ router = APIRouter()
 
 
 @router.get("/runs/{run_id}/download/wide")
-async def download_wide(run_id: str):
+async def download_wide(run_id: str, dl_token: str | None = Query(None)):
     run = store.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -26,15 +26,21 @@ async def download_wide(run_id: str):
     p = Path(run["wide_csv"])
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
+
+    headers = {}
+    if dl_token:
+        headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
     return FileResponse(
         path=str(p),
         media_type="text/csv",
         filename=f"{run_id}_exceptions_wide.csv",
+        headers=headers,
     )
 
 
 @router.get("/runs/{run_id}/download/long")
-async def download_long(run_id: str):
+async def download_long(run_id: str, dl_token: str | None = Query(None)):
     run = store.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -43,15 +49,21 @@ async def download_long(run_id: str):
     p = Path(run["long_csv"])
     if not p.exists():
         raise HTTPException(status_code=404, detail="File not found on disk")
+
+    headers = {}
+    if dl_token:
+        headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
     return FileResponse(
         path=str(p),
         media_type="text/csv",
         filename=f"{run_id}_exceptions_long.csv",
+        headers=headers,
     )
 
 
 @router.get("/runs/{run_id}/download/missing-data")
-async def download_missing_data(run_id: str):
+async def download_missing_data(run_id: str, dl_token: str | None = Query(None)):
     """Build and download a 2-sheet Missing Data Excel workbook."""
     run = store.get_run(run_id)
     if not run:
@@ -100,14 +112,19 @@ async def download_missing_data(run_id: str):
         cell.fill = header_fill
         cell.font = header_font
 
-    # Count per code
-    code_counts: dict[str, int] = {}
-    for code in missing_df["exception_code"]:
-        if code:
-            code_counts[code] = code_counts.get(code, 0) + 1
+    # Count per code (vectorized in Polars, not row-wise Python loop)
+    code_counts_df = (
+        missing_df.select("exception_code")
+        .group_by("exception_code")
+        .len("count")
+        .sort("count", descending=True)
+        .to_dicts()
+    )
 
     row = 2
-    for code, cnt in sorted(code_counts.items(), key=lambda x: x[1], reverse=True):
+    for item in code_counts_df:
+        code = item["exception_code"]
+        cnt = item["count"]
         pct = round(cnt / total_rows * 100, 1) if total_rows > 0 else 0.0
         ws1.cell(row=row, column=1, value=_MISSING_LABELS.get(code, code))
         ws1.cell(row=row, column=2, value=code)
@@ -133,10 +150,10 @@ async def download_missing_data(run_id: str):
         cell.fill = header_fill
         cell.font = header_font
 
+    # Batch append rows instead of cell-by-cell writes (much faster for large datasets)
     detail_sub = missing_df.select(detail_cols)
-    for row_idx, data_row in enumerate(detail_sub.rows(), 2):
-        for col_idx, val in enumerate(data_row, 1):
-            ws2.cell(row=row_idx, column=col_idx, value=val)
+    for data_row in detail_sub.rows():
+        ws2.append(data_row)
 
     for col_idx in range(1, len(detail_cols) + 1):
         ws2.column_dimensions[get_column_letter(col_idx)].width = 22
@@ -145,10 +162,14 @@ async def download_missing_data(run_id: str):
     wb.save(buf)
     buf.seek(0)
 
+    headers = {
+        "Content-Disposition": f'attachment; filename="{run_id}_missing_data.xlsx"',
+    }
+    if dl_token:
+        headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="{run_id}_missing_data.xlsx"',
-        },
+        headers=headers,
     )

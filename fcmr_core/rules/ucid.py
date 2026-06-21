@@ -24,7 +24,13 @@ from collections import defaultdict
 import polars as pl
 
 from fcmr_core.config import settings
+from fcmr_core.logging_setup import get_logger
 from fcmr_core.rules.registry import register
+
+logger = get_logger(__name__)
+
+# Safety cap: if row count exceeds this, address fuzzy matching is skipped with a warning
+UCID_ADDRESS_MATCH_THRESHOLD = 100_000
 
 
 def _hash_aadhaar(raw: str) -> str:
@@ -194,10 +200,18 @@ def rule_ucid(df: pl.DataFrame) -> pl.DataFrame:
     _union_by_key(uf, accts)
 
     # --- Address fuzzy: token-bucket candidates → Jaccard check ---
+    # Safety cap: skip address matching on very large datasets to prevent address-pair explosion
     addrs = _col_list(df, "address_line1")
-    for i, j in _address_candidate_pairs(addrs):
-        if _address_similarity(addrs[i], addrs[j]) >= 0.85:
-            uf.union(i, j)
+    if n > UCID_ADDRESS_MATCH_THRESHOLD:
+        logger.warning(
+            "ucid_address_match_skipped n=%d threshold=%d — address deduplication disabled",
+            n,
+            UCID_ADDRESS_MATCH_THRESHOLD,
+        )
+    else:
+        for i, j in _address_candidate_pairs(addrs):
+            if _address_similarity(addrs[i], addrs[j]) >= 0.85:
+                uf.union(i, j)
 
     # --- Assign UCIDs ---
     groups = uf.groups()

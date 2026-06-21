@@ -19,6 +19,12 @@
   </div>
 </div>
 
+{# Low-Tier Hardware Warning #}
+<div id="tier-warning" style="display:none;" class="notice notice-warn">
+  <strong>⚠️ Low-tier hardware detected.</strong> DuckDB memory is limited to 3 GB.
+  Keep uploads under ~50k rows to avoid memory issues. Consider reducing fuzzy-match threshold if uploads fail.
+</div>
+
 {# DuckDB Configuration Card #}
 <div class="card" id="duckdb-config-card">
   <div class="card-title">DuckDB Configuration</div>
@@ -158,6 +164,112 @@
       Creates a ZIP file with your catalog database and all generated reports.
       Store backups safely for data recovery.
     </p>
+
+    {% if backups %}
+    <div style="margin-top:16px; padding:12px; background:var(--row-alt); border-radius:6px;">
+      <div style="font-size:12.5px; font-weight:600; margin-bottom:8px;">Available Backups</div>
+      <table style="width:100%; font-size:11px; border-collapse:collapse;">
+        <thead style="background:#f5f5f5;">
+          <tr>
+            <th style="text-align:left; padding:6px; border:1px solid #ddd;">Filename</th>
+            <th style="text-align:right; padding:6px; border:1px solid #ddd;">Size (MB)</th>
+            <th style="text-align:left; padding:6px; border:1px solid #ddd;">Created</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for backup in backups %}
+          <tr>
+            <td style="padding:6px; border:1px solid #ddd; font-family:monospace;">{{ backup.filename }}</td>
+            <td style="text-align:right; padding:6px; border:1px solid #ddd;">{{ backup.size_mb }}</td>
+            <td style="padding:6px; border:1px solid #ddd; color:var(--muted);">{{ backup.created_at }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {# NOTE: Restore form is hidden by default (data-restore-disabled=true).
+           It requires typed confirmation to prevent accidental data loss.
+           Human review required before enabling in production. #}
+      <details style="margin-top:12px; padding:12px; background:#fff5f5; border:1px solid #ffcccc; border-radius:4px;">
+        <summary style="cursor:pointer; font-weight:600; color:#c00; font-size:12px;">
+          ⚠️ Restore from Backup (DESTRUCTIVE — use with caution)
+        </summary>
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #ffcccc;">
+          <p style="font-size:11px; color:#666; margin-bottom:8px;">
+            This will overwrite your current catalog and outputs with data from the selected backup.
+            Make sure you have saved your current work first.
+          </p>
+          <form method="POST" action="/settings/restore-backup" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="form-group">
+              <label for="restore-backup-select" style="font-size:11px; font-weight:600;">Select Backup</label>
+              <select id="restore-backup-select" name="backup_filename" required style="width:100%; padding:6px; border:1px solid #ffcccc; border-radius:4px; font-size:11px;">
+                <option value="">-- Choose a backup --</option>
+                {% for backup in backups %}
+                <option value="{{ backup.filename }}">{{ backup.filename }} ({{ backup.size_mb }} MB)</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="restore-confirm" style="font-size:11px; font-weight:600;">Type Confirmation</label>
+              <input type="text" id="restore-confirm" name="confirmation" placeholder="restore-BACKUP_FILENAME" required style="width:100%; padding:6px; border:1px solid #ffcccc; border-radius:4px; font-size:11px;">
+              <div class="help-text" style="margin-top:4px; font-size:10px; color:#c00;">To confirm, type exactly: restore-FILENAME (replace FILENAME with the selected backup)</div>
+            </div>
+            <button type="submit" class="btn" style="align-self:flex-start; background:#c00; color:white; border:none; padding:6px 12px; border-radius:4px; font-size:11px;">Restore from Backup</button>
+          </form>
+        </div>
+      </details>
+    </div>
+    {% else %}
+    <div style="margin-top:16px; padding:12px; background:var(--row-alt); border-radius:6px; color:var(--muted); font-size:12px;">
+      No backups yet. Create a backup first.
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Change Password</div>
+    <div class="card-sub">Update your admin password</div>
+
+    <form method="POST" action="/settings/change-password" style="display:flex; flex-direction:column; gap:12px; margin-top:12px;">
+      <div class="form-group">
+        <label for="current-pwd">Current Password</label>
+        <input type="password" id="current-pwd" name="current_password" required style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
+      </div>
+
+      <div class="form-group">
+        <label for="new-pwd">New Password</label>
+        <input type="password" id="new-pwd" name="new_password" required minlength="8" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
+        <div class="help-text" style="margin-top:4px; font-size:12px;">At least 8 characters</div>
+      </div>
+
+      <div class="form-group">
+        <label for="new-pwd-confirm">Confirm New Password</label>
+        <input type="password" id="new-pwd-confirm" name="new_password_confirm" required minlength="8" style="width:100%; padding:8px; border:1px solid var(--border); border-radius:6px;">
+      </div>
+
+      <div style="display:flex; gap:10px;">
+        <button type="submit" class="btn btn-primary" data-loading-text="Updating…">Change Password</button>
+        <button type="reset" class="btn btn-ghost">Clear</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="border-left:4px solid var(--warn-text); background:var(--row-alt);">
+    <div class="card-title">Quit Application</div>
+    <div class="card-sub">Stop the backend server and close the application</div>
+
+    <button id="quit-btn" onclick="quitApplication()" class="btn btn-ghost" style="margin-top:12px;">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+        <path d="M2 8L14 8M8 2L14 8L8 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Quit Application
+    </button>
+    <p class="help-text" style="margin-top:8px; font-size:12.5px;">
+      Gracefully stops the backend server and releases all memory.
+      You can close this window after the server stops.
+    </p>
+    <div id="quit-notice" style="display:none; margin-top:12px;" class="notice">
+      Server stopped. You can now close this window.
+    </div>
   </div>
 
 </div>
@@ -187,6 +299,11 @@
       document.getElementById('duckdb-memory').textContent = data.duckdb.memory_limit;
       document.getElementById('duckdb-threads').textContent = data.duckdb.threads;
       document.getElementById('spill-dir').textContent = data.duckdb.temp_directory;
+
+      // Show tier warning for low-tier hardware
+      if (data.hardware.tier === 'low') {
+        document.getElementById('tier-warning').style.display = 'block';
+      }
     } catch (e) {
       console.error('Failed to load system info:', e);
     }
@@ -291,6 +408,32 @@
   window.addEventListener('beforeunload', () => {
     if (monitorInterval) clearInterval(monitorInterval);
   });
+
+  // Quit application
+  window.quitApplication = async function() {
+    if (!confirm('Are you sure you want to quit the application?\n\nThis will stop the backend server and close this window.')) {
+      return;
+    }
+    const btn = document.getElementById('quit-btn');
+    const notice = document.getElementById('quit-notice');
+    try {
+      btn.disabled = true;
+      btn.textContent = 'Quitting…';
+      const res = await fetch('/api/system/shutdown', { method: 'POST' });
+      if (res.ok) {
+        notice.style.display = 'block';
+        btn.textContent = 'Application Quit';
+      } else {
+        btn.textContent = 'Quit Application';
+        btn.disabled = false;
+        alert('Failed to quit: ' + (res.statusText || 'unknown error'));
+      }
+    } catch (e) {
+      btn.textContent = 'Quit Application';
+      btn.disabled = false;
+      alert('Error: ' + e.message);
+    }
+  };
 </script>
 
 {% endblock %}

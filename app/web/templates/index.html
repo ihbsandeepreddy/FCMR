@@ -56,6 +56,7 @@
         <th>Report Type</th>
         <th style="text-align:right">Rows</th>
         <th>Status</th>
+        <th>Analytics</th>
         <th>Uploaded</th>
         <th>Ingested</th>
         <th></th>
@@ -71,6 +72,17 @@
         <td><span class="badge badge-type">{{ "EAD Files" if u.report_type == "ead_files" else u.report_type.replace("_"," ").title() }}</span></td>
         <td class="mono right">{{ "{:,}".format(u.row_count) if u.row_count else "—" }}</td>
         <td><span class="badge badge-{{ u.status }}">{{ u.status.replace("_"," ") }}</span></td>
+        <td>
+          {% if run_summaries.get(u.upload_id) %}
+          {% set rs = run_summaries[u.upload_id] %}
+          <a href="/dashboard/uploads/{{ u.upload_id }}" style="text-decoration:none;">
+            <span style="font-size:12px; color:var(--text);">{{ rs.count }} run(s)</span>
+            <span class="badge badge-{{ rs.last_status }}" style="margin-left:4px;">{{ rs.last_status }}</span>
+          </a>
+          {% else %}
+          <span style="color:var(--muted);">—</span>
+          {% endif %}
+        </td>
         <td class="timestamp">{{ u.created_at[:16].replace("T"," ") }}</td>
         <td class="timestamp">{{ u.ingested_at[:16].replace("T"," ") if u.ingested_at else "—" }}</td>
         <td style="text-align:right; white-space:nowrap;">

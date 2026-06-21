@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import threading
+import time
+
 import psutil
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
+from fcmr_core.catalog import store
 from fcmr_core.config import settings
 
 router = APIRouter()
@@ -100,3 +105,24 @@ async def get_recent_logs(lines: int = 100):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/system/shutdown")
+async def shutdown_server():
+    """Gracefully shutdown the backend server and free its memory.
+
+    Closes the DuckDB catalog cleanly, then exits the process.
+    Works for all run modes (start.bat, desktop_backend, Vercel).
+    """
+
+    def _cleanup_and_exit():
+        time.sleep(0.5)  # Let response flush to browser
+        try:
+            store.close_catalog()
+        except Exception:
+            pass
+        os._exit(0)  # Force process termination, OS reclaims all memory
+
+    thread = threading.Thread(target=_cleanup_and_exit, daemon=True)
+    thread.start()
+    return JSONResponse({"status": "shutting_down"})

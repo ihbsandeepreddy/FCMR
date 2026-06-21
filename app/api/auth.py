@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request
@@ -11,6 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.catalog import store
+from fcmr_core.logging_setup import get_logger
+from fcmr_core.security import hash_password, verify_password
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
@@ -21,26 +23,12 @@ _ADMIN_USERNAME = "admin"
 _ADMIN_PASSWORD = "admin123"  # Must be changed on first login
 
 
-def _hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
-    """Hash password with salt using pbkdf2. Returns (hash, salt)."""
-    if salt is None:
-        salt = secrets.token_hex(16)
-    hash_obj = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000)
-    return hash_obj.hex(), salt
-
-
-def _verify_password(password: str, password_hash: str, salt: str) -> bool:
-    """Verify password against hash and salt."""
-    computed_hash, _ = _hash_password(password, salt)
-    return computed_hash == password_hash
-
-
 def _ensure_admin() -> None:
     """Create default admin user if it doesn't exist."""
     try:
         user = store.get_user(_ADMIN_USERNAME)
         if user is None:
-            pwd_hash, salt = _hash_password(_ADMIN_PASSWORD)
+            pwd_hash, salt = hash_password(_ADMIN_PASSWORD)
             # Store salt:hash in password_hash field
             store.create_user(_ADMIN_USERNAME, f"{salt}:{pwd_hash}", "Admin User")
             print(
@@ -70,18 +58,28 @@ async def login(request: Request, username: str = Form(...), password: str = For
         raise HTTPException(status_code=500, detail="Invalid password format")
     salt, stored_hash = pwd_parts
 
-    if not _verify_password(password, stored_hash, salt):
+    if not verify_password(password, stored_hash, salt):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
     # Create response and set session cookie
     response = RedirectResponse(url="/", status_code=303)
     request.session["username"] = username
     request.session["display_name"] = user["display_name"]
+
+    # Log login event
+    store.log_audit_event(action="login", username=username)
+
     return response
 
 
 @router.post("/logout")
 async def logout(request: Request):
     """Logout user and clear session."""
+    username = request.session.get("username")
+
+    # Log logout event (before clearing session)
+    if username:
+        store.log_audit_event(action="logout", username=username)
+
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)

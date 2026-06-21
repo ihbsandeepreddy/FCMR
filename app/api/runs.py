@@ -9,10 +9,26 @@ from pathlib import Path
 
 import polars as pl
 import psutil
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from fcmr_core.analytics.cm_analytics import (
+    generate_aadhaar_coverage,
+    generate_bank_account_anomalies,
+    generate_coapplicant_concentration,
+    generate_fraud_risk_flags,
+)
+from fcmr_core.analytics.cm_summary import (
+    generate_cluster_distribution,
+    generate_coapplicant_overlap,
+    generate_data_quality_summary,
+    generate_demographic_distribution,
+    generate_duplication_summary,
+    generate_geographic_distribution,
+    generate_kyc_completeness,
+    generate_lan_concentration,
+)
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
 from fcmr_core.ingestion.pipeline import read_parquet
@@ -23,7 +39,13 @@ from fcmr_core.reporting.aggregation import (
     aggregate_status_counts,
 )
 from fcmr_core.reporting.builder import build_exception_csvs
-from fcmr_core.reporting.charts import build_bar_chart, build_donut_svg
+from fcmr_core.reporting.charts import (
+    build_bar_chart,
+    build_donut_svg,
+    build_duplicates_pie,
+    build_kyc_completeness_bar,
+    build_lorenz_curve,
+)
 from fcmr_core.reporting.workpaper import build_workpaper
 from fcmr_core.rules.registry import list_categories, resolve_rule_ids, run_pipeline
 from fcmr_core.sampling.sample import select_sample
@@ -42,6 +64,29 @@ class _RunCancelled(Exception):
 
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
+
+
+def _resolve_run_selection(
+    mode: str, categories: list[str] | None, rules: list[str] | None
+) -> list[str] | None:
+    """Resolve the run's rule selection, validating before any run row is created.
+
+    Returns None for "run all"; otherwise a non-empty rule_ids list. Raises a 400
+    when "Run Selected" is requested with nothing checked (resolve returns None),
+    so a phantom "running" run is never created for an empty selection.
+    """
+    if mode == "all":
+        return None
+    rule_ids = resolve_rule_ids(categories or [], rules or [])
+    if rule_ids is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No categories or rules selected. Either check some options and "
+                "click 'Run Selected', or click 'Run All Rules'."
+            ),
+        )
+    return rule_ids
 
 
 @router.get("/runs", response_class=HTMLResponse)
@@ -79,16 +124,24 @@ async def runs_start(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
+    # Validate selection BEFORE creating the run (no orphaned "running" run on 400)
+    rule_ids = _resolve_run_selection(mode, categories, rules)
+
     engagement_id = request.session.get("engagement_id")
+    username = request.session.get("username")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
-
-    if mode == "all":
-        rule_ids = None
-    else:
-        rule_ids = resolve_rule_ids(categories or [], rules or [])
+    if rule_ids is not None:
         # Persist selected rules for display in run_detail
-        store.update_run(run_id, selected_rules=json.dumps(rule_ids or []))
+        store.update_run(run_id, selected_rules=json.dumps(rule_ids))
+
+    # Log run start
+    store.log_audit_event(
+        action="run_started",
+        target=run_id,
+        detail=f"upload_id={upload_id}",
+        username=username,
+    )
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
@@ -109,25 +162,23 @@ async def start_run(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
+    # Validate selection BEFORE creating the run (no orphaned "running" run on 400)
+    rule_ids = _resolve_run_selection(mode, categories, rules)
+    logger.info(
+        "start_run mode=%s upload_id=%s categories=%s rules=%s resolved=%s",
+        mode,
+        upload_id,
+        categories,
+        rules,
+        rule_ids,
+    )
+
     engagement_id = request.session.get("engagement_id")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
-
-    # Resolve category selection to rule_ids
-    if mode == "all":
-        rule_ids = None
-        logger.info("start_run mode=all upload_id=%s", upload_id)
-    else:
-        rule_ids = resolve_rule_ids(categories or [], rules or [])
-        logger.info(
-            "start_run mode=selected upload_id=%s categories=%s rules=%s resolved=%s",
-            upload_id,
-            categories,
-            rules,
-            rule_ids,
-        )
+    if rule_ids is not None:
         # Persist selected rules for display in run_detail
-        store.update_run(run_id, selected_rules=json.dumps(rule_ids or []))
+        store.update_run(run_id, selected_rules=json.dumps(rule_ids))
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
 
@@ -158,6 +209,59 @@ async def run_status(run_id: str):
             "error": run.get("error") or "",
         }
     )
+
+
+def _build_workpaper_background(run_id: str, upload: dict) -> None:
+    """Pre-generate workpaper after analytics completes (best-effort background task)."""
+    run = store.get_run(run_id)
+    if (
+        not run
+        or run["status"] != "completed"
+        or not run.get("wide_csv")
+        or not run.get("long_csv")
+    ):
+        return
+
+    engagement_id = run.get("engagement_id") or "default"
+    engagement = store.get_engagement(engagement_id)
+    if not engagement:
+        engagement = {
+            "engagement_id": engagement_id,
+            "name": "Audit Engagement",
+            "client_name": "—",
+            "period_from": None,
+            "period_to": None,
+        }
+
+    wide_path = Path(run["wide_csv"])
+    long_path = Path(run["long_csv"])
+    if not wide_path.exists() or not long_path.exists():
+        return
+
+    df = pl.read_csv(wide_path, infer_schema_length=0)
+    population = len(df)
+    exception_count = df.get_column("overall_status").ne("OK").sum()
+
+    sample_records = select_sample(
+        wide_path,
+        engagement_id=engagement_id,
+        run_id=run_id,
+        population=population,
+        exception_count=exception_count,
+    )
+
+    workpaper_path = build_workpaper(
+        engagement=engagement,
+        run=run,
+        upload=upload,
+        wide_csv_path=wide_path,
+        long_csv_path=long_path,
+        sample_records=sample_records,
+        output_dir=settings.outputs_dir / run_id,
+    )
+
+    store.update_run(run_id, workpaper_path=str(workpaper_path))
+    logger.info("workpaper_prebuilt run_id=%s path=%s", run_id, workpaper_path.name)
 
 
 def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = None) -> None:
@@ -239,20 +343,44 @@ def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = Non
             progress_step="Done",
             progress_pct=100,
         )
+        # Log run completion
+        store.log_audit_event(
+            action="run_completed",
+            target=run_id,
+            detail=f"upload_id={upload_id}",
+        )
+
+        # Pre-generate workpaper in background (best-effort; on failure, download builds on-demand)
+        try:
+            _build_workpaper_background(run_id, upload)
+        except Exception as exc:
+            logger.warning("workpaper_prebuild_failed run_id=%s error=%s", run_id, str(exc))
     except _RunCancelled:
         _cancel_requests.discard(run_id)
         store.update_run(run_id, status="cancelled", finished_at=_now(), error="Stopped by user.")
         logger.info("job_cancelled run_id=%s", run_id)
+        # Log run cancellation
+        store.log_audit_event(
+            action="run_cancelled",
+            target=run_id,
+            detail=f"upload_id={upload_id}",
+        )
     except Exception as exc:
         logger.error("job_failed run_id=%s error=%s", run_id, type(exc).__name__)
         store.update_run(run_id, status="failed", finished_at=_now(), error=str(exc))
+        # Log run failure
+        store.log_audit_event(
+            action="run_failed",
+            target=run_id,
+            detail=f"upload_id={upload_id}, error={type(exc).__name__}",
+        )
 
 
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
 async def run_detail(request: Request, run_id: str):
     import json
 
-    from fcmr_core.rules.registry import CATEGORIES
+    from fcmr_core.rules.registry import CATEGORIES, list_rules
 
     run = store.get_run(run_id)
     if not run:
@@ -263,6 +391,30 @@ async def run_detail(request: Request, run_id: str):
     summary = None
     ran_categories = None
     missing_summary = None
+    cm_summaries = {}  # All 8 CM summary reports
+    rules_run = []
+    sibling_runs = []
+
+    # Determine which rules were run and build rules_run list
+    try:
+        selected_rules_json = run.get("selected_rules")
+        if selected_rules_json:
+            selected_rule_ids = json.loads(selected_rules_json)
+            rules_run = [
+                {"rule_id": r.rule_id, "description": r.description}
+                for r in list_rules()
+                if r.rule_id in selected_rule_ids
+            ]
+        else:
+            rules_run = [{"rule_id": r.rule_id, "description": r.description} for r in list_rules()]
+    except Exception:
+        rules_run = []
+
+    # Get sibling runs (other runs on the same upload)
+    try:
+        sibling_runs = store.list_runs(run["upload_id"])
+    except Exception:
+        sibling_runs = []
 
     # Map selected_rules to category labels
     if run.get("selected_rules"):
@@ -293,6 +445,67 @@ async def run_detail(request: Request, run_id: str):
             donut_svg = build_donut_svg(status_counts, width=300, height=300)
             bar_svg = build_bar_chart(top_exception_codes, width=700, height=400)
 
+            # B5 Charts: Lorenz, KYC Completeness, Duplicates Pie
+            lorenz_svg = None
+            kyc_svg = None
+            duplicates_svg = None
+            try:
+                # Lorenz curve: cumulative exception distribution across customers
+                df = store.get_upload_df(run["upload_id"])
+                if df is not None and not df.is_empty():
+                    # Count exceptions per customer, sort descending, compute cumulative %
+                    exc_per_cust = (
+                        df.select(pl.col("customer_id"))
+                        .filter(pl.col("overall_status") != "OK")
+                        .group_by("customer_id")
+                        .agg(pl.count().alias("exc_count"))
+                        .sort("exc_count", descending=True)
+                        .select(pl.col("exc_count"))
+                    )
+                    if len(exc_per_cust) > 0:
+                        total_exc = exc_per_cust.select(pl.col("exc_count").sum())[0, 0]
+                        cumulative = []
+                        running_sum = 0
+                        for exc_count in exc_per_cust["exc_count"]:
+                            running_sum += exc_count
+                            cumulative.append(
+                                (running_sum / total_exc * 100) if total_exc > 0 else 0
+                            )
+                        lorenz_svg = build_lorenz_curve(cumulative)
+
+                    # KYC Completeness: field coverage % across dataset
+                    field_coverage = {}
+                    for field in [
+                        "pan",
+                        "aadhaar",
+                        "mobile",
+                        "email",
+                        "dob",
+                        "voter_id",
+                    ]:
+                        if field in df.columns:
+                            present = (
+                                df.filter(pl.col(field).is_not_null())
+                                .filter(
+                                    pl.col(field).cast(pl.Utf8, strict=False).str.len_chars() > 0
+                                )
+                                .height
+                            )
+                            coverage = (present / len(df) * 100) if len(df) > 0 else 0
+                            field_coverage[field.upper()] = coverage
+                    if field_coverage:
+                        kyc_svg = build_kyc_completeness_bar(field_coverage)
+
+                    # Duplicates Pie: breakdown of duplicate types
+                    duplicate_types = {}
+                    for code in all_exception_codes.keys():
+                        if "DUPLICATE" in code:
+                            duplicate_types[code] = all_exception_codes[code]
+                    if duplicate_types:
+                        duplicates_svg = build_duplicates_pie(duplicate_types)
+            except Exception:
+                pass  # Silently skip B5 charts if error
+
             total = sum(status_counts.values())
             all_codes = [{"exception_code": c, "count": n} for c, n in all_exception_codes.items()]
             summary = {
@@ -307,6 +520,184 @@ async def run_detail(request: Request, run_id: str):
                 if long_path.exists():
                     missing_summary = aggregate_missing_data(long_path, total)
 
+            # Compute all 8 CM summary reports (for CM runs)
+            cm_unavailable = []  # Collect unavailable summaries (missing data)
+            try:
+                upload = store.get_upload(run["upload_id"])
+                if upload and upload.get("report_type") == "customer_master":
+                    df = store.get_upload_df(run["upload_id"])
+                    if df is not None and not df.is_empty():
+                        # Report #1: Geographic distribution
+                        geo = generate_geographic_distribution(df)
+                        if geo and not geo.is_empty():
+                            if "note" in geo.columns:
+                                cm_unavailable.append(
+                                    {"title": "Geographic Distribution", "reason": geo[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["geographic"] = {
+                                    "title": "Geographic Distribution",
+                                    "data": geo.to_dicts(),
+                                    "columns": geo.columns,
+                                }
+                        # Report #2: KYC completeness
+                        kyc = generate_kyc_completeness(df)
+                        if kyc and not kyc.is_empty():
+                            if "note" in kyc.columns:
+                                cm_unavailable.append(
+                                    {"title": "KYC Field Completeness", "reason": kyc[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["kyc_completeness"] = {
+                                    "title": "KYC Field Completeness",
+                                    "data": kyc.to_dicts(),
+                                    "columns": kyc.columns,
+                                }
+                        # Report #3: Demographics
+                        demo = generate_demographic_distribution(df)
+                        if demo and not demo.is_empty():
+                            if "note" in demo.columns:
+                                cm_unavailable.append(
+                                    {"title": "Demographic Distribution", "reason": demo[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["demographics"] = {
+                                    "title": "Demographic Distribution",
+                                    "data": demo.to_dicts(),
+                                    "columns": demo.columns,
+                                }
+                        # Report #4: Duplication summary
+                        dup = generate_duplication_summary(df)
+                        if dup and not dup.is_empty():
+                            if "note" in dup.columns:
+                                cm_unavailable.append(
+                                    {"title": "Duplication Summary", "reason": dup[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["duplicates"] = {
+                                    "title": "Duplication Summary",
+                                    "data": dup.to_dicts(),
+                                    "columns": dup.columns,
+                                }
+                        # Report #5: Co-applicant overlap
+                        coapp = generate_coapplicant_overlap(df)
+                        if coapp and not coapp.is_empty():
+                            if "note" in coapp.columns:
+                                cm_unavailable.append(
+                                    {"title": "Co-Applicant Overlap", "reason": coapp[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["coapplicant"] = {
+                                    "title": "Co-Applicant Overlap",
+                                    "data": coapp.to_dicts(),
+                                    "columns": coapp.columns,
+                                }
+                        # Report #6: Cluster distribution
+                        cluster = generate_cluster_distribution(df)
+                        if cluster and not cluster.is_empty():
+                            if "note" in cluster.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "Related-Party Clusters",
+                                        "reason": cluster[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["clusters"] = {
+                                    "title": "Related-Party Clusters",
+                                    "data": cluster.to_dicts(),
+                                    "columns": cluster.columns,
+                                }
+                        # Report #7: Data quality
+                        dq = generate_data_quality_summary(df)
+                        if dq and not dq.is_empty():
+                            if "note" in dq.columns:
+                                cm_unavailable.append(
+                                    {"title": "Data Quality Summary", "reason": dq[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["data_quality"] = {
+                                    "title": "Data Quality Summary",
+                                    "data": dq.to_dicts(),
+                                    "columns": dq.columns,
+                                }
+                        # Report #8: LAN concentration
+                        lan = generate_lan_concentration(df)
+                        if lan and not lan.is_empty():
+                            if "note" in lan.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "LAN Concentration (Top 10)",
+                                        "reason": lan[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["lan_concentration"] = {
+                                    "title": "LAN Concentration (Top 10)",
+                                    "data": lan.to_dicts(),
+                                    "columns": lan.columns,
+                                }
+                        # B4.1: Aadhaar coverage
+                        aadhaar_cov = generate_aadhaar_coverage(df)
+                        if aadhaar_cov and not aadhaar_cov.is_empty():
+                            if "note" in aadhaar_cov.columns:
+                                cm_unavailable.append(
+                                    {"title": "Aadhaar Coverage", "reason": aadhaar_cov[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["aadhaar_coverage"] = {
+                                    "title": "Aadhaar Coverage",
+                                    "data": aadhaar_cov.to_dicts(),
+                                    "columns": aadhaar_cov.columns,
+                                }
+                        # B4.2: Fraud-risk flags
+                        fraud_flags = generate_fraud_risk_flags(df)
+                        if fraud_flags and not fraud_flags.is_empty():
+                            if "note" in fraud_flags.columns:
+                                cm_unavailable.append(
+                                    {"title": "Fraud-Risk Flags", "reason": fraud_flags[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["fraud_risk_flags"] = {
+                                    "title": "Fraud-Risk Flags",
+                                    "data": fraud_flags.to_dicts(),
+                                    "columns": fraud_flags.columns,
+                                }
+                        # B4.3: Co-applicant concentration
+                        coapp_conc = generate_coapplicant_concentration(df)
+                        if coapp_conc and not coapp_conc.is_empty():
+                            if "note" in coapp_conc.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "Co-Applicant Concentration",
+                                        "reason": coapp_conc[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["coapplicant_concentration"] = {
+                                    "title": "Co-Applicant Concentration",
+                                    "data": coapp_conc.to_dicts(),
+                                    "columns": coapp_conc.columns,
+                                }
+                        # B4.4: Bank account anomalies
+                        bank_anomalies = generate_bank_account_anomalies(df)
+                        if bank_anomalies and not bank_anomalies.is_empty():
+                            if "note" in bank_anomalies.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "Bank Account Anomalies",
+                                        "reason": bank_anomalies[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["bank_account_anomalies"] = {
+                                    "title": "Bank Account Anomalies",
+                                    "data": bank_anomalies.to_dicts(),
+                                    "columns": bank_anomalies.columns,
+                                }
+            except Exception:
+                cm_summaries = {}
+
     return templates.TemplateResponse(
         request=request,
         name="run_detail.html",
@@ -315,14 +706,21 @@ async def run_detail(request: Request, run_id: str):
             "summary": summary,
             "donut_svg": donut_svg,
             "bar_svg": bar_svg,
+            "lorenz_svg": lorenz_svg,
+            "kyc_svg": kyc_svg,
+            "duplicates_svg": duplicates_svg,
             "ran_categories": ran_categories,
             "missing_summary": missing_summary,
+            "cm_summaries": cm_summaries,
+            "cm_unavailable": cm_unavailable,
+            "rules_run": rules_run,
+            "sibling_runs": sibling_runs,
         },
     )
 
 
 @router.get("/runs/{run_id}/export/svg")
-async def export_charts_svg(run_id: str):
+async def export_charts_svg(run_id: str, dl_token: str | None = Query(None)):
     """Export donut + bar charts as a single SVG."""
     run = store.get_run(run_id)
     if not run or run["status"] != "completed" or not run["wide_csv"]:
@@ -356,7 +754,11 @@ async def export_charts_svg(run_id: str):
   </g>
 </svg>"""
 
-    return combined_svg
+    headers = {}
+    if dl_token:
+        headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
+    return Response(combined_svg, media_type="image/svg+xml", headers=headers)
 
 
 @router.get("/runs/{run_id}/charts/donut.svg")
@@ -394,7 +796,7 @@ async def get_bar_chart(run_id: str):
 
 
 @router.get("/runs/{run_id}/export/workpaper")
-async def export_workpaper(run_id: str):
+async def export_workpaper(run_id: str, dl_token: str | None = Query(None)):
     """Generate and download workpaper Excel."""
     run = store.get_run(run_id)
     if not run or run["status"] != "completed" or not run["wide_csv"] or not run["long_csv"]:
@@ -418,10 +820,29 @@ async def export_workpaper(run_id: str):
     if not wide_path.exists() or not long_path.exists():
         raise HTTPException(status_code=404, detail="CSV files not found")
 
+    # Fetch upload for workpaper metadata
+    upload = store.get_upload(run["upload_id"])
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    # Serve cached workpaper if present on disk
+    if run.get("workpaper_path"):
+        cached_path = Path(run["workpaper_path"])
+        if cached_path.exists():
+            headers = {}
+            if dl_token:
+                headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+            return FileResponse(
+                cached_path,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=cached_path.name,
+                headers=headers,
+            )
+
     try:
         df = pl.read_csv(wide_path, infer_schema_length=0)
         population = len(df)
-        exception_count = sum(1 for val in df["overall_status"] if val != "OK")
+        exception_count = df.get_column("overall_status").ne("OK").sum()
 
         # Use resolved engagement_id (fallback to "default" if missing)
         resolved_engagement_id = engagement_id or "default"
@@ -436,20 +857,54 @@ async def export_workpaper(run_id: str):
         workpaper_path = build_workpaper(
             engagement=engagement,
             run=run,
+            upload=upload,
             wide_csv_path=wide_path,
+            long_csv_path=long_path,
             sample_records=sample_records,
             output_dir=settings.outputs_dir / run_id,
         )
 
         store.update_run(run_id, workpaper_path=str(workpaper_path))
 
+        headers = {}
+        if dl_token:
+            headers["Set-Cookie"] = f"dl_done_{dl_token}=1; Path=/; Max-Age=10"
+
         return FileResponse(
             workpaper_path,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=workpaper_path.name,
+            headers=headers,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Workpaper generation failed: {exc}") from exc
+
+
+@router.get("/runs/{run_id}/results.json")
+async def get_run_results_json(run_id: str):
+    """Get run results as JSON (read-only API)."""
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run["status"] != "completed" or not run["wide_csv"]:
+        raise HTTPException(status_code=400, detail="Run not completed yet")
+
+    wide_path = Path(run["wide_csv"])
+    if not wide_path.exists():
+        raise HTTPException(status_code=404, detail="Wide CSV not found")
+
+    # Get status counts and top exception codes
+    status_counts = aggregate_status_counts(wide_path)
+    exception_codes = aggregate_exception_codes(wide_path, top_n=10)
+
+    return {
+        "run_id": run_id,
+        "status": run["status"],
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "status_counts": status_counts,
+        "top_exception_codes": exception_codes,
+    }
 
 
 def _now() -> str:

@@ -1,4 +1,4 @@
-/* FCMR — Design System (warm beige + terracotta palette) */
+/* SanGir Automations — Design System (warm beige + terracotta palette) */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -64,30 +64,18 @@ body {
 }
 
 .sidebar-logo {
-  height: 64px;
+  height: 120px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 15px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 16px;
   gap: 9px;
   flex-shrink: 0;
 }
 
-.sidebar-logo-mark {
-  width: 26px; height: 26px;
-  background: var(--accent);
-  border-radius: 5px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 5px;
-  flex-shrink: 0;
-}
-
 .sidebar-logo-img {
-  max-width: 140px;
-  max-height: 48px;
+  max-width: 188px;
+  max-height: 96px;
   object-fit: contain;
 }
 
@@ -569,3 +557,26 @@ body {
 
 .app-overlay-box .spinner { width: 32px; height: 32px; border-width: 3px; }
 .app-overlay-box-message { font-size: 14px; font-weight: 500; color: var(--text); text-align: center; }
+
+/* ── Print styles (PDF/Print optimization) ──────────────────── */
+@media print {
+  body { background: white; }
+  .sidebar, .topbar, .btn-dl, .btn-run, .btn-sm, .form-group, .form-actions, #quit-btn, .notice-warn, .tier-warning {
+    display: none !important;
+  }
+  .main-area { margin-left: 0; }
+  .page-content { padding: 0; }
+  .card { page-break-inside: avoid; box-shadow: none; border: 1px solid #ddd; margin-bottom: 20px; }
+  .card-title { font-size: 16px; margin-bottom: 12px; font-weight: 600; }
+  .card-sub { font-size: 12px; color: #666; margin-bottom: 8px; }
+  h1, h2, h3 { page-break-after: avoid; }
+  .stat-row, .stat-card { page-break-inside: avoid; }
+  svg { max-width: 100%; }
+  a { color: #0066cc; text-decoration: underline; }
+  .detail-grid dt { font-weight: 600; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  table th { background: #f5f5f5; padding: 8px; text-align: left; font-weight: 600; border: 1px solid #ddd; }
+  table td { padding: 8px; border: 1px solid #ddd; }
+  .unavailable-summaries { background: #f9f9f9; padding: 12px; border-radius: 4px; margin-top: 12px; }
+}

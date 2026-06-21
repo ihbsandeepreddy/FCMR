@@ -89,6 +89,11 @@ def init_catalog() -> None:
                 created_at    TEXT NOT NULL
             )
         """)
+        # Migrate users table: add role column (default 'admin' for backward compat)
+        try:
+            con.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'admin'")
+        except Exception:
+            pass  # Column already exists
 
         # Engagements table
         con.execute("""
@@ -211,6 +216,18 @@ def init_catalog() -> None:
                 error         TEXT,
                 progress_step TEXT,
                 progress_pct  INTEGER
+            )
+        """)
+
+        # Audit log for lifecycle events
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                event_id    TEXT PRIMARY KEY,
+                ts          TEXT NOT NULL,
+                username    TEXT,
+                action      TEXT NOT NULL,
+                target      TEXT,
+                detail      TEXT
             )
         """)
 
@@ -488,6 +505,43 @@ def list_runs_for_engagement(engagement_id: str) -> list[dict]:
     return [dict(zip(cols, row)) for row in rows]
 
 
+def get_run_summaries_by_upload(engagement_id: str) -> dict[str, dict]:
+    """Return summaries of runs per upload: {upload_id: {"count": int, "last_status": str, "last_run_id": str, "last_finished": str}}.
+
+    Only includes uploads that have at least one run.
+    """
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT upload_id, COUNT(*) as count,
+                       MAX(started_at) as last_started,
+                       FIRST_VALUE(run_id) OVER (PARTITION BY upload_id ORDER BY started_at DESC) as last_run_id,
+                       FIRST_VALUE(status) OVER (PARTITION BY upload_id ORDER BY started_at DESC) as last_status,
+                       FIRST_VALUE(finished_at) OVER (PARTITION BY upload_id ORDER BY started_at DESC) as last_finished
+                FROM runs
+                WHERE engagement_id = ?
+                GROUP BY upload_id
+                """,
+                [engagement_id],
+            ).fetchall()
+            cols = [d[0] for d in con.description]
+
+        result = {}
+        for row in rows:
+            row_dict = dict(zip(cols, row))
+            upload_id = row_dict["upload_id"]
+            result[upload_id] = {
+                "count": row_dict["count"],
+                "last_status": row_dict["last_status"],
+                "last_run_id": row_dict["last_run_id"],
+                "last_finished": row_dict["last_finished"],
+            }
+        return result
+    except Exception:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # User CRUD
 # ---------------------------------------------------------------------------
@@ -508,6 +562,152 @@ def get_user(username: str) -> dict | None:
             return None
         cols = [d[0] for d in con.description]
     return dict(zip(cols, rows[0]))
+
+
+def update_password(username: str, password_hash: str) -> None:
+    """Update user password hash. Hash should be in 'salt:hash' format."""
+    with _conn() as con:
+        con.execute(
+            "UPDATE users SET password_hash=? WHERE username=?",
+            [password_hash, username],
+        )
+
+
+def list_users() -> list[dict]:
+    """List all users with their roles and metadata."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT username, display_name, role, created_at
+            FROM users
+            ORDER BY created_at ASC
+            """).fetchall()
+
+    return [
+        {
+            "username": row[0],
+            "display_name": row[1],
+            "role": row[2] or "admin",  # Default to admin if NULL
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
+
+
+def set_role(username: str, role: str) -> None:
+    """Set user's role ('admin' or 'user')."""
+    if role not in ("admin", "user"):
+        raise ValueError(f"Invalid role: {role}")
+
+    with _conn() as con:
+        con.execute("UPDATE users SET role=? WHERE username=?", [role, username])
+
+
+# ---------------------------------------------------------------------------
+# Rule Configuration (per-engagement disabled rules)
+# ---------------------------------------------------------------------------
+
+
+def get_disabled_rules(engagement_id: str) -> list[str]:
+    """Get list of disabled rule IDs for an engagement.
+
+    Returns empty list if no rules are disabled (default: all enabled).
+    """
+    import json
+
+    key = f"disabled_rules:{engagement_id}"
+    setting = get_setting(key)
+    if not setting or not setting.get("value"):
+        return []
+    try:
+        return json.loads(setting["value"])
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def set_disabled_rules(engagement_id: str, rule_ids: list[str]) -> None:
+    """Set the list of disabled rule IDs for an engagement.
+
+    Stores as JSON in the settings table with key 'disabled_rules:<engagement_id>'.
+    Pass an empty list to enable all rules.
+    """
+    import json
+
+    key = f"disabled_rules:{engagement_id}"
+    value = json.dumps(rule_ids) if rule_ids else "[]"
+    set_setting(key, value)
+
+
+# ---------------------------------------------------------------------------
+# Audit Log
+# ---------------------------------------------------------------------------
+
+
+def log_audit_event(
+    action: str,
+    target: str | None = None,
+    detail: str | None = None,
+    username: str | None = None,
+) -> str:
+    """Log an audit event.
+
+    Args:
+        action: Action performed (e.g., 'run_started', 'login', 'logout')
+        target: Target of the action (e.g., run_id, engagement_id)
+        detail: Optional detail text (avoid PII)
+        username: Username (if None, not recorded)
+
+    Returns:
+        event_id (UUID-like string)
+    """
+    import uuid
+
+    event_id = str(uuid.uuid4())
+    ts = _now()
+
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO audit_log (event_id, ts, username, action, target, detail)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [event_id, ts, username, action, target, detail],
+        )
+
+    return event_id
+
+
+def list_audit_events(limit: int = 100, offset: int = 0) -> list[dict]:
+    """List recent audit events.
+
+    Args:
+        limit: Max events to return (default 100)
+        offset: Offset for pagination (default 0)
+
+    Returns:
+        List of audit event dicts, most recent first.
+    """
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT event_id, ts, username, action, target, detail
+            FROM audit_log
+            ORDER BY ts DESC
+            LIMIT ? OFFSET ?
+            """,
+            [limit, offset],
+        ).fetchall()
+
+    return [
+        {
+            "event_id": row[0],
+            "ts": row[1],
+            "username": row[2],
+            "action": row[3],
+            "target": row[4],
+            "detail": row[5],
+        }
+        for row in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
