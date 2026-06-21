@@ -494,6 +494,7 @@ async def run_detail(request: Request, run_id: str):
                     missing_summary = aggregate_missing_data(long_path, total)
 
             # Compute all 8 CM summary reports (for CM runs)
+            cm_unavailable = []  # Collect unavailable summaries (missing data)
             try:
                 upload = store.get_upload(run["upload_id"])
                 if upload and upload.get("report_type") == "customer_master":
@@ -501,116 +502,172 @@ async def run_detail(request: Request, run_id: str):
                     if df is not None and not df.is_empty():
                         # Report #1: Geographic distribution
                         geo = generate_geographic_distribution(df)
-                        if geo and not geo.is_empty() and "note" not in geo.columns:
-                            cm_summaries["geographic"] = {
-                                "title": "Geographic Distribution",
-                                "data": geo.to_dicts(),
-                                "columns": geo.columns,
-                            }
+                        if geo and not geo.is_empty():
+                            if "note" in geo.columns:
+                                cm_unavailable.append(
+                                    {"title": "Geographic Distribution", "reason": geo[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["geographic"] = {
+                                    "title": "Geographic Distribution",
+                                    "data": geo.to_dicts(),
+                                    "columns": geo.columns,
+                                }
                         # Report #2: KYC completeness
                         kyc = generate_kyc_completeness(df)
-                        if kyc and not kyc.is_empty() and "note" not in kyc.columns:
-                            cm_summaries["kyc_completeness"] = {
-                                "title": "KYC Field Completeness",
-                                "data": kyc.to_dicts(),
-                                "columns": kyc.columns,
-                            }
+                        if kyc and not kyc.is_empty():
+                            if "note" in kyc.columns:
+                                cm_unavailable.append(
+                                    {"title": "KYC Field Completeness", "reason": kyc[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["kyc_completeness"] = {
+                                    "title": "KYC Field Completeness",
+                                    "data": kyc.to_dicts(),
+                                    "columns": kyc.columns,
+                                }
                         # Report #3: Demographics
                         demo = generate_demographic_distribution(df)
-                        if demo and not demo.is_empty() and "note" not in demo.columns:
-                            cm_summaries["demographics"] = {
-                                "title": "Demographic Distribution",
-                                "data": demo.to_dicts(),
-                                "columns": demo.columns,
-                            }
+                        if demo and not demo.is_empty():
+                            if "note" in demo.columns:
+                                cm_unavailable.append(
+                                    {"title": "Demographic Distribution", "reason": demo[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["demographics"] = {
+                                    "title": "Demographic Distribution",
+                                    "data": demo.to_dicts(),
+                                    "columns": demo.columns,
+                                }
                         # Report #4: Duplication summary
                         dup = generate_duplication_summary(df)
-                        if dup and not dup.is_empty() and "note" not in dup.columns:
-                            cm_summaries["duplicates"] = {
-                                "title": "Duplication Summary",
-                                "data": dup.to_dicts(),
-                                "columns": dup.columns,
-                            }
+                        if dup and not dup.is_empty():
+                            if "note" in dup.columns:
+                                cm_unavailable.append(
+                                    {"title": "Duplication Summary", "reason": dup[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["duplicates"] = {
+                                    "title": "Duplication Summary",
+                                    "data": dup.to_dicts(),
+                                    "columns": dup.columns,
+                                }
                         # Report #5: Co-applicant overlap
                         coapp = generate_coapplicant_overlap(df)
-                        if coapp and not coapp.is_empty() and "note" not in coapp.columns:
-                            cm_summaries["coapplicant"] = {
-                                "title": "Co-Applicant Overlap",
-                                "data": coapp.to_dicts(),
-                                "columns": coapp.columns,
-                            }
+                        if coapp and not coapp.is_empty():
+                            if "note" in coapp.columns:
+                                cm_unavailable.append(
+                                    {"title": "Co-Applicant Overlap", "reason": coapp[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["coapplicant"] = {
+                                    "title": "Co-Applicant Overlap",
+                                    "data": coapp.to_dicts(),
+                                    "columns": coapp.columns,
+                                }
                         # Report #6: Cluster distribution
                         cluster = generate_cluster_distribution(df)
-                        if cluster and not cluster.is_empty() and "note" not in cluster.columns:
-                            cm_summaries["clusters"] = {
-                                "title": "Related-Party Clusters",
-                                "data": cluster.to_dicts(),
-                                "columns": cluster.columns,
-                            }
+                        if cluster and not cluster.is_empty():
+                            if "note" in cluster.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "Related-Party Clusters",
+                                        "reason": cluster[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["clusters"] = {
+                                    "title": "Related-Party Clusters",
+                                    "data": cluster.to_dicts(),
+                                    "columns": cluster.columns,
+                                }
                         # Report #7: Data quality
                         dq = generate_data_quality_summary(df)
-                        if dq and not dq.is_empty() and "note" not in dq.columns:
-                            cm_summaries["data_quality"] = {
-                                "title": "Data Quality Summary",
-                                "data": dq.to_dicts(),
-                                "columns": dq.columns,
-                            }
+                        if dq and not dq.is_empty():
+                            if "note" in dq.columns:
+                                cm_unavailable.append(
+                                    {"title": "Data Quality Summary", "reason": dq[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["data_quality"] = {
+                                    "title": "Data Quality Summary",
+                                    "data": dq.to_dicts(),
+                                    "columns": dq.columns,
+                                }
                         # Report #8: LAN concentration
                         lan = generate_lan_concentration(df)
-                        if lan and not lan.is_empty() and "note" not in lan.columns:
-                            cm_summaries["lan_concentration"] = {
-                                "title": "LAN Concentration (Top 10)",
-                                "data": lan.to_dicts(),
-                                "columns": lan.columns,
-                            }
+                        if lan and not lan.is_empty():
+                            if "note" in lan.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "LAN Concentration (Top 10)",
+                                        "reason": lan[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["lan_concentration"] = {
+                                    "title": "LAN Concentration (Top 10)",
+                                    "data": lan.to_dicts(),
+                                    "columns": lan.columns,
+                                }
                         # B4.1: Aadhaar coverage
                         aadhaar_cov = generate_aadhaar_coverage(df)
-                        if (
-                            aadhaar_cov
-                            and not aadhaar_cov.is_empty()
-                            and "note" not in aadhaar_cov.columns
-                        ):
-                            cm_summaries["aadhaar_coverage"] = {
-                                "title": "Aadhaar Coverage",
-                                "data": aadhaar_cov.to_dicts(),
-                                "columns": aadhaar_cov.columns,
-                            }
+                        if aadhaar_cov and not aadhaar_cov.is_empty():
+                            if "note" in aadhaar_cov.columns:
+                                cm_unavailable.append(
+                                    {"title": "Aadhaar Coverage", "reason": aadhaar_cov[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["aadhaar_coverage"] = {
+                                    "title": "Aadhaar Coverage",
+                                    "data": aadhaar_cov.to_dicts(),
+                                    "columns": aadhaar_cov.columns,
+                                }
                         # B4.2: Fraud-risk flags
                         fraud_flags = generate_fraud_risk_flags(df)
-                        if (
-                            fraud_flags
-                            and not fraud_flags.is_empty()
-                            and "note" not in fraud_flags.columns
-                        ):
-                            cm_summaries["fraud_risk_flags"] = {
-                                "title": "Fraud-Risk Flags",
-                                "data": fraud_flags.to_dicts(),
-                                "columns": fraud_flags.columns,
-                            }
+                        if fraud_flags and not fraud_flags.is_empty():
+                            if "note" in fraud_flags.columns:
+                                cm_unavailable.append(
+                                    {"title": "Fraud-Risk Flags", "reason": fraud_flags[0, "note"]}
+                                )
+                            else:
+                                cm_summaries["fraud_risk_flags"] = {
+                                    "title": "Fraud-Risk Flags",
+                                    "data": fraud_flags.to_dicts(),
+                                    "columns": fraud_flags.columns,
+                                }
                         # B4.3: Co-applicant concentration
                         coapp_conc = generate_coapplicant_concentration(df)
-                        if (
-                            coapp_conc
-                            and not coapp_conc.is_empty()
-                            and "note" not in coapp_conc.columns
-                        ):
-                            cm_summaries["coapplicant_concentration"] = {
-                                "title": "Co-Applicant Concentration",
-                                "data": coapp_conc.to_dicts(),
-                                "columns": coapp_conc.columns,
-                            }
+                        if coapp_conc and not coapp_conc.is_empty():
+                            if "note" in coapp_conc.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "Co-Applicant Concentration",
+                                        "reason": coapp_conc[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["coapplicant_concentration"] = {
+                                    "title": "Co-Applicant Concentration",
+                                    "data": coapp_conc.to_dicts(),
+                                    "columns": coapp_conc.columns,
+                                }
                         # B4.4: Bank account anomalies
                         bank_anomalies = generate_bank_account_anomalies(df)
-                        if (
-                            bank_anomalies
-                            and not bank_anomalies.is_empty()
-                            and "note" not in bank_anomalies.columns
-                        ):
-                            cm_summaries["bank_account_anomalies"] = {
-                                "title": "Bank Account Anomalies",
-                                "data": bank_anomalies.to_dicts(),
-                                "columns": bank_anomalies.columns,
-                            }
+                        if bank_anomalies and not bank_anomalies.is_empty():
+                            if "note" in bank_anomalies.columns:
+                                cm_unavailable.append(
+                                    {
+                                        "title": "Bank Account Anomalies",
+                                        "reason": bank_anomalies[0, "note"],
+                                    }
+                                )
+                            else:
+                                cm_summaries["bank_account_anomalies"] = {
+                                    "title": "Bank Account Anomalies",
+                                    "data": bank_anomalies.to_dicts(),
+                                    "columns": bank_anomalies.columns,
+                                }
             except Exception:
                 cm_summaries = {}
 
@@ -628,6 +685,7 @@ async def run_detail(request: Request, run_id: str):
             "ran_categories": ran_categories,
             "missing_summary": missing_summary,
             "cm_summaries": cm_summaries,
+            "cm_unavailable": cm_unavailable,
             "rules_run": rules_run,
             "sibling_runs": sibling_runs,
         },
