@@ -53,7 +53,7 @@
         </svg>
         Run All Rules
       </button>
-      <button type="submit" name="mode" value="selected" class="btn btn-primary" id="run_selected_btn" data-loading-text="Starting…">
+      <button type="button" class="btn btn-primary" id="run_selected_btn" data-loading-text="Starting…">
         Run Selected Rules
       </button>
     </div>
@@ -64,6 +64,7 @@
     const catCheckboxes = document.querySelectorAll('input[name="categories"], input[name="rules"]');
     const runAllBtn = document.getElementById('run_all_btn');
     const runSelectedBtn = document.getElementById('run_selected_btn');
+    const form = document.getElementById('new-analysis-form');
 
     function updateButtonState() {
       const anyChecked = Array.from(catCheckboxes).some(cb => cb.checked);
@@ -80,6 +81,22 @@
       cb.addEventListener('change', updateButtonState);
     });
     updateButtonState();
+
+    // Validate "Run Selected" and submit the form
+    runSelectedBtn.addEventListener('click', function(e) {
+      const anyChecked = Array.from(catCheckboxes).some(cb => cb.checked);
+      if (!anyChecked) {
+        alert('Please select at least one category or rule, or click "Run All Rules" to run everything.');
+        return;
+      }
+      // Create a hidden input for the mode and submit
+      const modeInput = document.createElement('input');
+      modeInput.type = 'hidden';
+      modeInput.name = 'mode';
+      modeInput.value = 'selected';
+      form.appendChild(modeInput);
+      form.submit();
+    });
   </script>
 </div>
 {% else %}

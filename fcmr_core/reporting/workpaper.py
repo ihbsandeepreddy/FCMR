@@ -11,9 +11,19 @@ from pathlib import Path
 
 import polars as pl
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from fcmr_core.logging_setup import get_logger
+from fcmr_core.reporting.excel_style import (
+    HEADER_FILL,
+    HEADER_FONT,
+    QUANTITY_FORMAT_INT,
+    THIN_BORDER,
+    apply_header_style,
+    auto_column_widths,
+    freeze_header,
+)
 from fcmr_core.rules.registry import CATEGORIES, list_rules
 from fcmr_core.sampling.stratification import _SEVERITY_MAP
 
@@ -137,17 +147,12 @@ def build_workpaper(
     ws_cover = wb.active
     ws_cover.title = "Cover"
 
-    # Styles
-    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=11)
+    # Styles (use shared utilities)
+    header_fill = HEADER_FILL
+    header_font = HEADER_FONT
     title_font = Font(bold=True, size=14)
     subheader_font = Font(bold=True, size=11)
-    border = Border(
-        left=Side(style="thin"),
-        right=Side(style="thin"),
-        top=Side(style="thin"),
-        bottom=Side(style="thin"),
-    )
+    border = THIN_BORDER
 
     # ── Sheet 0: Cover ──
     _build_cover_sheet(
@@ -179,7 +184,9 @@ def build_workpaper(
 
     # ── Sheet 2: Detailed Exceptions ──
     ws2 = wb.create_sheet("Detailed Exceptions")
-    _build_detailed_exceptions_sheet(ws2, wide_csv_path, header_fill, header_font, border)
+    _build_detailed_exceptions_sheet(
+        ws2, wide_csv_path, header_fill, header_font, border, max_rows=50000
+    )
 
     # ── Sheet 3: TOC and TOD ──
     ws3 = wb.create_sheet("TOC and TOD")
@@ -463,6 +470,7 @@ def _build_lead_sheet(
             ws[f"D{row}"] = proc["category"]
             ws[f"E{row}"] = proc["severity"]
             ws[f"F{row}"] = proc["exceptions"]
+            ws[f"F{row}"].number_format = QUANTITY_FORMAT_INT
             exc_pct = (proc["exceptions"] / total_records * 100) if total_records > 0 else 0
             ws[f"G{row}"] = f"{exc_pct:.1f}%"
             row += 1
@@ -500,25 +508,50 @@ def _build_lead_sheet(
     ws.column_dimensions["E"].width = 12
     ws.column_dimensions["F"].width = 12
     ws.column_dimensions["G"].width = 12
+    # Note: no freeze/autofilter here — the Lead sheet is a non-tabular summary
+    # (title, info, breakdown, procedures sub-table, prose), not a single table.
 
 
-def _build_detailed_exceptions_sheet(ws, wide_csv_path, header_fill, header_font, border):
-    """Build Detailed Exceptions sheet (WIDE: all columns + per-rule status columns)."""
+def _build_detailed_exceptions_sheet(
+    ws, wide_csv_path, header_fill, header_font, border, max_rows: int = 50000
+):
+    """Build Detailed Exceptions sheet (exception rows only, capped for scale safety).
+
+    Args:
+        ws: openpyxl worksheet
+        wide_csv_path: Path to wide CSV
+        header_fill: Header cell fill style
+        header_font: Header cell font style
+        border: Border style (currently unused but available)
+        max_rows: Maximum rows to write (default 50,000); prevents OOM on large files
+    """
     try:
         df = pl.read_csv(wide_csv_path, infer_schema_length=0)
 
+        # Filter to exception rows only (overall_status != "OK")
+        exc_df = df.filter(pl.col("overall_status") != "OK")
+
+        # Log truncation if capping
+        total_exceptions = len(exc_df)
+        if total_exceptions > max_rows:
+            get_logger("reporting").warning(
+                "detailed_exceptions_truncated total=%d capped=%d",
+                total_exceptions,
+                max_rows,
+            )
+            exc_df = exc_df.head(max_rows)
+
         # Mask Aadhaar (vectorized): replace with XXXXXXXX + last 4 chars
-        for col_name in df.columns:
+        for col_name in exc_df.columns:
             if "aadhaar" in col_name.lower() or "aadhar" in col_name.lower():
-                df = df.with_columns(
+                exc_df = exc_df.with_columns(
                     pl.when(pl.col(col_name).str.len_chars() >= 4)
                     .then(pl.lit("XXXXXXXX") + pl.col(col_name).str.slice(-4))
                     .otherwise(pl.col(col_name))
                     .alias(col_name)
                 )
 
-        # Keep ALL columns (wide format: all original + summary columns)
-        col_names = df.columns
+        col_names = exc_df.columns
 
         # Header row with styling
         for col_idx, col_name in enumerate(col_names, 1):
@@ -526,17 +559,22 @@ def _build_detailed_exceptions_sheet(ws, wide_csv_path, header_fill, header_font
             cell.fill = header_fill
             cell.font = header_font
 
-        # Data rows via batch append (no per-cell borders; much faster for large sheets)
-        for row_vals in df.iter_rows(allow_na=True):
+        # Data rows via batch append (no per-cell borders; much faster)
+        for row_vals in exc_df.iter_rows(allow_na=True):
             ws.append(row_vals)
 
         # Freeze top row and enable autofilter
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
+        freeze_header(ws)
 
         # Adjust column widths (cap at 18)
-        for col_idx in range(1, len(col_names) + 1):
-            ws.column_dimensions[get_column_letter(col_idx)].width = min(18, 20)
+        auto_column_widths(ws, max_width=18)
+
+        # Metadata row (below the data, before signing off)
+        if total_exceptions > max_rows:
+            metadata_row = len(exc_df) + 2
+            ws[f"A{metadata_row}"] = (
+                f"Note: Showing {max_rows:,} of {total_exceptions:,} exception rows. Full data available in exception CSVs."
+            )
     except Exception:
         ws["A1"] = "Unable to load exception data"
 
@@ -585,9 +623,13 @@ def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
         "Notes",
     ]
     for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_idx, value=header)
-        cell.fill = header_fill
-        cell.font = header_font
+        ws.cell(row=1, column=col_idx, value=header)
+    apply_header_style(ws, row=1)
+
+    # Apply borders to all cells
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+        for cell in row:
+            cell.border = border
 
     # Sample rows
     for sample_idx, sample in enumerate(sample_records, 2):
@@ -605,6 +647,32 @@ def _build_toc_tod_sheet(ws, sample_records, header_fill, header_font, border):
     # Adjust column widths
     for col_idx, width in enumerate([8, 10, 12, 28, 28, 14, 22, 15, 12, 12, 16], 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+
+def _get_selected_category_ids(run: dict) -> set[str]:
+    """Return the set of category ids that were selected in the run.
+
+    If selected_rules is None/empty (run all), return all category ids.
+    Otherwise, return the ids of categories with at least one selected rule.
+    Keyed on CATEGORIES ids so the ICFR table can't drift from the registry.
+    """
+    all_ids = {cat["id"] for cat in CATEGORIES}
+
+    selected_rules_json = run.get("selected_rules")
+    if not selected_rules_json:
+        # Run all rules → include all categories
+        return all_ids
+
+    try:
+        selected_rule_ids = set(json.loads(selected_rules_json))
+    except Exception:
+        return all_ids
+
+    selected_cats = {
+        cat["id"] for cat in CATEGORIES if any(rid in selected_rule_ids for rid in cat["rule_ids"])
+    }
+
+    return selected_cats if selected_cats else all_ids
 
 
 def _build_methodology_sheet(
@@ -715,20 +783,54 @@ def _build_methodology_sheet(
         cell.font = Font(bold=True, color="FFFFFF", size=11)
     row += 1
 
+    # Keyed by CATEGORIES id (single source of truth) → (display label, objective,
+    # assertion, standard). Order follows the registry's CATEGORIES order.
     icfr_mappings = [
-        ("KYC Format", "Customer identity is valid & verifiable", "Accuracy", "RBI KYC / ICAI"),
-        ("Address & PIN", "Address is complete & valid", "Completeness", "RBI KYC / ICAI"),
-        ("Duplicates", "No duplicate / fictitious customers", "Existence", "NFRA fraud indicators"),
-        ("Missing Data", "Mandatory KYC fields captured", "Completeness", "RBI KYC"),
-        ("Identity Grouping", "Related parties identified", "Existence", "ICAI / NFRA"),
+        (
+            "missing_data",
+            "Missing Data",
+            "Mandatory KYC fields captured",
+            "Completeness",
+            "RBI KYC",
+        ),
+        (
+            "kyc_format",
+            "KYC & Document Format",
+            "Customer identity is valid & verifiable",
+            "Accuracy",
+            "RBI KYC / ICAI",
+        ),
+        (
+            "address_pin",
+            "Address & PIN",
+            "Address is complete & valid",
+            "Completeness",
+            "RBI KYC / ICAI",
+        ),
+        (
+            "duplicates",
+            "Duplicate Detection",
+            "No duplicate / fictitious customers",
+            "Existence",
+            "NFRA fraud indicators",
+        ),
+        (
+            "identity_grouping",
+            "Identity Grouping (UCID + Beneficiary)",
+            "Related parties identified",
+            "Existence",
+            "ICAI / NFRA",
+        ),
     ]
 
-    for cat, obj, assertion, standard in icfr_mappings:
-        ws[f"A{row}"] = cat
-        ws[f"B{row}"] = obj
-        ws[f"C{row}"] = assertion
-        ws[f"D{row}"] = standard
-        row += 1
+    selected_cat_ids = _get_selected_category_ids(run)
+    for cat_id, label, obj, assertion, standard in icfr_mappings:
+        if cat_id in selected_cat_ids:
+            ws[f"A{row}"] = label
+            ws[f"B{row}"] = obj
+            ws[f"C{row}"] = assertion
+            ws[f"D{row}"] = standard
+            row += 1
 
     # Adjust column widths
     ws.column_dimensions["A"].width = 20

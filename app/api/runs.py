@@ -44,6 +44,29 @@ _templates_dir = Path(__file__).parent.parent / "web" / "templates"
 templates = Jinja2Templates(directory=str(_templates_dir))
 
 
+def _resolve_run_selection(
+    mode: str, categories: list[str] | None, rules: list[str] | None
+) -> list[str] | None:
+    """Resolve the run's rule selection, validating before any run row is created.
+
+    Returns None for "run all"; otherwise a non-empty rule_ids list. Raises a 400
+    when "Run Selected" is requested with nothing checked (resolve returns None),
+    so a phantom "running" run is never created for an empty selection.
+    """
+    if mode == "all":
+        return None
+    rule_ids = resolve_rule_ids(categories or [], rules or [])
+    if rule_ids is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No categories or rules selected. Either check some options and "
+                "click 'Run Selected', or click 'Run All Rules'."
+            ),
+        )
+    return rule_ids
+
+
 @router.get("/runs", response_class=HTMLResponse)
 async def runs_list(request: Request):
     engagement_id = request.session.get("engagement_id")
@@ -79,16 +102,15 @@ async def runs_start(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
+    # Validate selection BEFORE creating the run (no orphaned "running" run on 400)
+    rule_ids = _resolve_run_selection(mode, categories, rules)
+
     engagement_id = request.session.get("engagement_id")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
-
-    if mode == "all":
-        rule_ids = None
-    else:
-        rule_ids = resolve_rule_ids(categories or [], rules or [])
+    if rule_ids is not None:
         # Persist selected rules for display in run_detail
-        store.update_run(run_id, selected_rules=json.dumps(rule_ids or []))
+        store.update_run(run_id, selected_rules=json.dumps(rule_ids))
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
@@ -109,25 +131,23 @@ async def start_run(
     if upload["status"] != "ready":
         raise HTTPException(status_code=400, detail="Upload is not ready")
 
+    # Validate selection BEFORE creating the run (no orphaned "running" run on 400)
+    rule_ids = _resolve_run_selection(mode, categories, rules)
+    logger.info(
+        "start_run mode=%s upload_id=%s categories=%s rules=%s resolved=%s",
+        mode,
+        upload_id,
+        categories,
+        rules,
+        rule_ids,
+    )
+
     engagement_id = request.session.get("engagement_id")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
-
-    # Resolve category selection to rule_ids
-    if mode == "all":
-        rule_ids = None
-        logger.info("start_run mode=all upload_id=%s", upload_id)
-    else:
-        rule_ids = resolve_rule_ids(categories or [], rules or [])
-        logger.info(
-            "start_run mode=selected upload_id=%s categories=%s rules=%s resolved=%s",
-            upload_id,
-            categories,
-            rules,
-            rule_ids,
-        )
+    if rule_ids is not None:
         # Persist selected rules for display in run_detail
-        store.update_run(run_id, selected_rules=json.dumps(rule_ids or []))
+        store.update_run(run_id, selected_rules=json.dumps(rule_ids))
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
 

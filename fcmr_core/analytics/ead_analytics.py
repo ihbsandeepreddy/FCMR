@@ -677,7 +677,10 @@ _REPORT_SHEET_NAMES: list[tuple[str, str]] = [
 
 
 def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> None:
-    """Write a Polars DataFrame to an openpyxl worksheet."""
+    """Write a Polars DataFrame to an openpyxl worksheet.
+
+    Preserves numeric types so Excel can format them (₹, %, etc).
+    """
     from openpyxl.styles import Alignment
     from openpyxl.utils import get_column_letter
 
@@ -688,8 +691,28 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-    str_df = df.with_columns([pl.col(c).cast(pl.Utf8, strict=False) for c in cols])
-    for ri, row in enumerate(str_df.rows(), 2):
+    # Preserve numeric types (so Excel keeps them right-aligned & summable);
+    # cast everything else to string. Covers signed + unsigned ints and floats.
+    _numeric_dtypes = (
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
+    )
+    casts = [
+        pl.col(col).cast(pl.Utf8, strict=False)
+        for col in cols
+        if df[col].dtype not in _numeric_dtypes
+    ]
+    df_for_write = df.with_columns(casts) if casts else df
+
+    for ri, row in enumerate(df_for_write.rows(), 2):
         for ci, val in enumerate(row, 1):
             cell = ws.cell(
                 row=ri, column=ci, value=val if val not in (None, "None", "null") else None
@@ -705,13 +728,18 @@ def _write_sheet(ws, df: pl.DataFrame, header_fill, header_font, data_font) -> N
 
 
 def build_ead_workpaper(reports: dict[str, pl.DataFrame], output_path: Path) -> None:
-    """Write all 13 EAD reports into one multi-sheet Excel workpaper."""
+    """Write all 13 EAD reports into one multi-sheet Excel workpaper.
+
+    Uses shared house-style colors and fonts from excel_style module.
+    """
     import openpyxl
-    from openpyxl.styles import Font, PatternFill
+    from openpyxl.styles import Font
+
+    from fcmr_core.reporting.excel_style import HEADER_FILL, HEADER_FONT
 
     wb = openpyxl.Workbook()
-    header_fill = PatternFill(start_color="5C3D1E", end_color="5C3D1E", fill_type="solid")
-    header_font = Font(bold=True, color="FFFFFF", size=10)
+    header_fill = HEADER_FILL
+    header_font = HEADER_FONT
     data_font = Font(size=10)
 
     first = True
