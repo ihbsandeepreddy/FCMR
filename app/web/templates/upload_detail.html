@@ -63,63 +63,102 @@
           <a href="/runs" class="btn btn-ghost" style="margin-top:10px; display:inline-block; font-size:13px;">Configure analysis (select categories) →</a>
 
         {% elif upload.report_type == "ead_files" %}
-          {# EAD analytics — analytics selection + submit #}
-          <form method="POST" action="/ead/analyze" id="ead_run_form" style="margin-top:6px;">
-
-            {# Primary analytics (pre-checked) #}
-            <div style="margin-bottom:10px;">
-              <div style="font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px; text-transform:uppercase; letter-spacing:.04em;">
-                Core Analytics
+          {# Months covered banner #}
+          {% if ead_months %}
+          <div style="display:flex; align-items:flex-start; gap:8px; margin-bottom:12px; padding:9px 12px; background:var(--accent-light); border-radius:6px; border:1px solid color-mix(in oklch, var(--accent) 25%, transparent);">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style="margin-top:1px; flex-shrink:0;">
+              <rect x="1" y="2.5" width="14" height="12" rx="2" stroke="var(--accent)" stroke-width="1.3" fill="none"/>
+              <path d="M5 1v3M11 1v3M1 6.5h14" stroke="var(--accent)" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+            <div>
+              <div style="font-size:11px; font-weight:600; color:var(--accent); text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px;">Months Covered</div>
+              <div style="display:flex; flex-wrap:wrap; gap:5px;">
+                {% for m in ead_months %}
+                <span style="display:inline-block; padding:2px 8px; background:var(--accent); color:#fff; border-radius:10px; font-size:11px; font-weight:600; font-family:var(--font-mono, 'IBM Plex Mono', monospace);">{{ m }}</span>
+                {% endfor %}
               </div>
-              {% set primary = [
-                ("ucid_lan",          "UCID → LAN Count"),
-                ("state_ead",         "State-wise EAD Balance"),
-                ("disbursement",      "Disbursements in Audit Period"),
-                ("product_ead",       "Product-wise EAD Balance"),
-                ("product_stage_dpd", "Product × Stage × DPD"),
-              ] %}
-              {% for key, label in primary %}
-              <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:5px; cursor:pointer;">
-                <input type="checkbox" name="selected_reports" value="{{ key }}" checked
-                       style="accent-color:var(--accent); width:15px; height:15px;">
-                {{ label }}
-              </label>
-              {% endfor %}
+              <div style="font-size:11px; color:var(--muted); margin-top:4px;">{{ ead_months|length }} month{{ 's' if ead_months|length != 1 else '' }} · {{ upload.row_count or 0 | int }} rows total</div>
+            </div>
+          </div>
+          {% endif %}
+
+          {# EAD analytics — Basic / Intermediate / Advanced tabs #}
+          <form method="POST" action="/ead/analyze" id="ead_run_form" style="margin-top:2px;">
+
+            {# Tab pills #}
+            <div style="display:flex; gap:4px; margin-bottom:10px;" role="tablist">
+              <button type="button" id="tab-basic" onclick="switchTab('basic')"
+                style="padding:4px 12px; border-radius:12px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid var(--accent); background:var(--accent); color:#fff; letter-spacing:.02em;">
+                Basic
+              </button>
+              <button type="button" id="tab-intermediate" onclick="switchTab('intermediate')"
+                style="padding:4px 12px; border-radius:12px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); letter-spacing:.02em;">
+                Intermediate
+              </button>
+              <button type="button" id="tab-advanced" onclick="switchTab('advanced')"
+                style="padding:4px 12px; border-radius:12px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--muted); letter-spacing:.02em;">
+                Advanced
+              </button>
             </div>
 
-            {# Additional analytics (collapsed, unchecked) #}
-            <details style="margin-bottom:10px;">
-              <summary style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; cursor:pointer; user-select:none; margin-bottom:6px;">
-                Additional Analytics ▸
-              </summary>
-              <div style="margin-top:8px; padding-left:4px;">
-                {% set additional = [
-                  ("pivot",           "Master Pivot Report"),
-                  ("stage_summary",   "Stage Summary"),
-                  ("dpd_summary",     "DPD Bucket Summary"),
-                  ("security",        "Secured vs Unsecured"),
-                  ("writeoff",        "Write-Off Summary"),
-                  ("sbu",             "SBU / SubSBU Breakdown"),
-                  ("provision_check", "Provision Reasonableness"),
-                  ("negative_check",  "Negative Values Check"),
-                  ("stage_mismatch",  "Stage-DPD Mismatch"),
-                  ("fvtpl",           "FVTPL Split"),
-                ] %}
-                {% for key, label in additional %}
-                <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:5px; cursor:pointer;">
-                  <input type="checkbox" name="selected_reports" value="{{ key }}"
-                         style="accent-color:var(--accent); width:15px; height:15px;">
-                  {{ label }}
-                </label>
-                {% endfor %}
-                <div style="margin-top:8px; display:flex; gap:12px;">
-                  <a href="#" onclick="setAll(true); return false;" style="font-size:12px; color:var(--accent);">Select All</a>
-                  <a href="#" onclick="setAll(false); return false;" style="font-size:12px; color:var(--muted);">Clear All</a>
-                </div>
+            {# Basic tab — all 23 analytics, 5 primary pre-checked #}
+            <div id="panel-basic">
+              {% set pre_checked = ['ucid_lan','state_ead','disbursement','product_ead','product_stage_dpd'] %}
+              {% set all_analytics = [
+                ("ucid_lan",                  "UCID → LAN Count"),
+                ("state_ead",                 "State-wise EAD (Last Month)"),
+                ("disbursement",              "Disbursements in Audit Period"),
+                ("product_ead",               "Product-wise EAD (Last Month)"),
+                ("product_stage_dpd",         "Product × Stage × DPD"),
+                ("pivot",                     "Master Pivot Report"),
+                ("stage_summary",             "Stage Summary"),
+                ("dpd_summary",               "DPD Bucket Summary"),
+                ("security",                  "Secured vs Unsecured"),
+                ("writeoff",                  "Write-Off Summary"),
+                ("sbu",                       "SBU / SubSBU Breakdown"),
+                ("provision_check",           "Provision Reasonableness"),
+                ("negative_check",            "Negative Values Check"),
+                ("stage_mismatch",            "Stage-DPD Mismatch"),
+                ("fvtpl",                     "FVTPL Split"),
+                ("portfolio_concentration",   "Portfolio Concentration"),
+                ("stage_distribution",        "Stage Distribution"),
+                ("dpd_risk_distribution",     "DPD-Risk Distribution"),
+                ("collateral_coverage",       "Collateral Coverage"),
+                ("provision_coverage",        "Provision Coverage"),
+                ("writeoff_recovery",         "Write-off & Recovery"),
+                ("sanction_disbursement",     "Sanction vs Disbursement"),
+                ("data_quality_ead",          "Data Quality Summary"),
+              ] %}
+              {% for key, label in all_analytics %}
+              <label style="display:flex; align-items:center; gap:8px; font-size:13px; margin-bottom:5px; cursor:pointer;">
+                <input type="checkbox" name="selected_reports" value="{{ key }}"
+                       {% if key in pre_checked %}checked{% endif %}
+                       style="accent-color:var(--accent); width:15px; height:15px;">
+                {{ label }}
+                {% if key in pre_checked %}<span style="font-size:10px; color:var(--accent); font-weight:600;">●</span>{% endif %}
+              </label>
+              {% endfor %}
+              <div style="margin-top:8px; display:flex; gap:12px;">
+                <a href="#" onclick="setAll(true); return false;" style="font-size:12px; color:var(--accent);">Select All</a>
+                <a href="#" onclick="setAll(false); return false;" style="font-size:12px; color:var(--muted);">Clear All</a>
               </div>
-            </details>
+            </div>
 
-            <button type="submit" class="btn btn-run" style="display:inline-flex; align-items:center; gap:6px; margin-top:4px;">
+            {# Intermediate tab — coming soon #}
+            <div id="panel-intermediate" style="display:none;">
+              <div class="empty-state" style="padding:18px 0;">
+                <div style="font-size:13px; color:var(--muted);">Intermediate analytics — coming soon.</div>
+              </div>
+            </div>
+
+            {# Advanced tab — coming soon #}
+            <div id="panel-advanced" style="display:none;">
+              <div class="empty-state" style="padding:18px 0;">
+                <div style="font-size:13px; color:var(--muted);">Advanced analytics — coming soon.</div>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-run" style="display:inline-flex; align-items:center; gap:6px; margin-top:10px;">
               <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <circle cx="8" cy="8" r="6.5" stroke="white" stroke-width="1.4" fill="none" opacity=".7"/>
                 <path d="M6.5 5.5L11 8L6.5 10.5Z" fill="white"/>
@@ -130,12 +169,23 @@
           <p class="help-text" style="margin-top:8px;">Runs on all ready EAD files in this engagement.</p>
 
           <script>
+          function switchTab(name) {
+            ['basic','intermediate','advanced'].forEach(function(t) {
+              var panel = document.getElementById('panel-' + t);
+              var btn   = document.getElementById('tab-' + t);
+              var active = t === name;
+              panel.style.display = active ? 'block' : 'none';
+              btn.style.background = active ? 'var(--accent)' : 'transparent';
+              btn.style.color      = active ? '#fff' : 'var(--muted)';
+              btn.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+            });
+          }
           function setAll(checked) {
-            document.querySelectorAll('#ead_run_form input[type=checkbox]')
-              .forEach(cb => cb.checked = checked);
+            document.querySelectorAll('#panel-basic input[type=checkbox]')
+              .forEach(function(cb) { cb.checked = checked; });
           }
           document.getElementById('ead_run_form').addEventListener('submit', function(e) {
-            const any = [...this.querySelectorAll('input[type=checkbox]')].some(c => c.checked);
+            var any = [...this.querySelectorAll('input[type=checkbox]')].some(function(c) { return c.checked; });
             if (!any) { e.preventDefault(); alert('Please select at least one analytic to run.'); }
           });
           </script>
