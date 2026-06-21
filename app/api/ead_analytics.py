@@ -17,6 +17,16 @@ from fcmr_core.analytics.ead_analytics import (
     compute_summary_stats,
     run_ead_analytics,
 )
+from fcmr_core.analytics.ead_summary import (
+    generate_collateral_coverage,
+    generate_data_quality_summary_ead,
+    generate_dpd_risk_distribution,
+    generate_portfolio_concentration,
+    generate_provision_coverage,
+    generate_sanction_disbursement_variance,
+    generate_stage_distribution,
+    generate_writeoff_recovery,
+)
 from fcmr_core.catalog import store
 from fcmr_core.config import settings
 
@@ -165,12 +175,39 @@ async def ead_run_detail(request: Request, run_id: str):
         context["previews"] = previews
 
         # Summary stats from merged DataFrame (re-build for stat cards)
+        ead_summaries = {}
         try:
             engagement_id = run.get("engagement_id") or request.session.get("engagement_id")
             df_all = _build_ead_df(engagement_id)
             context["summary"] = compute_summary_stats(df_all)
+
+            # Compute all 8 EAD summary reports
+            if df_all is not None and not df_all.is_empty():
+                summaries = [
+                    ("Portfolio Concentration", generate_portfolio_concentration(df_all)),
+                    ("Stage Distribution", generate_stage_distribution(df_all)),
+                    ("DPD/Risk Distribution", generate_dpd_risk_distribution(df_all)),
+                    ("Collateral Coverage", generate_collateral_coverage(df_all)),
+                    ("Provision Coverage", generate_provision_coverage(df_all)),
+                    ("Write-off & Recovery", generate_writeoff_recovery(df_all)),
+                    ("Sanction vs Disbursement", generate_sanction_disbursement_variance(df_all)),
+                    ("Data Quality Summary", generate_data_quality_summary_ead(df_all)),
+                ]
+                for title, summary_df in summaries:
+                    if (
+                        summary_df
+                        and not summary_df.is_empty()
+                        and "note" not in summary_df.columns
+                    ):
+                        ead_summaries[title] = {
+                            "title": title,
+                            "data": summary_df.to_dicts(),
+                            "columns": summary_df.columns,
+                        }
         except Exception:
             context["summary"] = {}
+
+        context["ead_summaries"] = ead_summaries
 
         context["workpaper_available"] = (output_dir / "ead_workpaper.xlsx").exists()
 
