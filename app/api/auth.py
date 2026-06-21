@@ -9,7 +9,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from fcmr_core.catalog import store
+from fcmr_core.logging_setup import get_logger
 from fcmr_core.security import hash_password, verify_password
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 _templates_dir = Path(__file__).parent.parent / "web" / "templates"
@@ -62,11 +65,21 @@ async def login(request: Request, username: str = Form(...), password: str = For
     response = RedirectResponse(url="/", status_code=303)
     request.session["username"] = username
     request.session["display_name"] = user["display_name"]
+
+    # Log login event
+    store.log_audit_event(action="login", username=username)
+
     return response
 
 
 @router.post("/logout")
 async def logout(request: Request):
     """Logout user and clear session."""
+    username = request.session.get("username")
+
+    # Log logout event (before clearing session)
+    if username:
+        store.log_audit_event(action="logout", username=username)
+
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)

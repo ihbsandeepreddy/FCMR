@@ -128,11 +128,20 @@ async def runs_start(
     rule_ids = _resolve_run_selection(mode, categories, rules)
 
     engagement_id = request.session.get("engagement_id")
+    username = request.session.get("username")
     run_id = store.create_run(upload_id, engagement_id)
     store.update_run(run_id, status="running", started_at=_now())
     if rule_ids is not None:
         # Persist selected rules for display in run_detail
         store.update_run(run_id, selected_rules=json.dumps(rule_ids))
+
+    # Log run start
+    store.log_audit_event(
+        action="run_started",
+        target=run_id,
+        detail=f"upload_id={upload_id}",
+        username=username,
+    )
 
     background_tasks.add_task(_run_analytics, run_id, upload_id, rule_ids)
     return RedirectResponse(url=f"/runs/{run_id}", status_code=303)
@@ -334,6 +343,12 @@ def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = Non
             progress_step="Done",
             progress_pct=100,
         )
+        # Log run completion
+        store.log_audit_event(
+            action="run_completed",
+            target=run_id,
+            detail=f"upload_id={upload_id}",
+        )
 
         # Pre-generate workpaper in background (best-effort; on failure, download builds on-demand)
         try:
@@ -344,9 +359,21 @@ def _run_analytics(run_id: str, upload_id: str, rule_ids: list[str] | None = Non
         _cancel_requests.discard(run_id)
         store.update_run(run_id, status="cancelled", finished_at=_now(), error="Stopped by user.")
         logger.info("job_cancelled run_id=%s", run_id)
+        # Log run cancellation
+        store.log_audit_event(
+            action="run_cancelled",
+            target=run_id,
+            detail=f"upload_id={upload_id}",
+        )
     except Exception as exc:
         logger.error("job_failed run_id=%s error=%s", run_id, type(exc).__name__)
         store.update_run(run_id, status="failed", finished_at=_now(), error=str(exc))
+        # Log run failure
+        store.log_audit_event(
+            action="run_failed",
+            target=run_id,
+            detail=f"upload_id={upload_id}, error={type(exc).__name__}",
+        )
 
 
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
