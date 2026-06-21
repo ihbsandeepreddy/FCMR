@@ -77,8 +77,9 @@ body {
 }
 
 .sidebar-logo-img {
-  max-width: 160px;
-  max-height: 88px;
+  width: 100%;
+  max-width: 185px;
+  max-height: 105px;
   object-fit: contain;
 }
 
