@@ -186,7 +186,37 @@
           {% endfor %}
         </tbody>
       </table>
-      <p class="help-text" style="margin-top:8px; font-size:11px;">Restore functionality coming soon.</p>
+      {# NOTE: Restore form is hidden by default (data-restore-disabled=true).
+           It requires typed confirmation to prevent accidental data loss.
+           Human review required before enabling in production. #}
+      <details style="margin-top:12px; padding:12px; background:#fff5f5; border:1px solid #ffcccc; border-radius:4px;">
+        <summary style="cursor:pointer; font-weight:600; color:#c00; font-size:12px;">
+          ⚠️ Restore from Backup (DESTRUCTIVE — use with caution)
+        </summary>
+        <div style="margin-top:12px; padding-top:12px; border-top:1px solid #ffcccc;">
+          <p style="font-size:11px; color:#666; margin-bottom:8px;">
+            This will overwrite your current catalog and outputs with data from the selected backup.
+            Make sure you have saved your current work first.
+          </p>
+          <form method="POST" action="/settings/restore-backup" style="display:flex; flex-direction:column; gap:8px;">
+            <div class="form-group">
+              <label for="restore-backup-select" style="font-size:11px; font-weight:600;">Select Backup</label>
+              <select id="restore-backup-select" name="backup_filename" required style="width:100%; padding:6px; border:1px solid #ffcccc; border-radius:4px; font-size:11px;">
+                <option value="">-- Choose a backup --</option>
+                {% for backup in backups %}
+                <option value="{{ backup.filename }}">{{ backup.filename }} ({{ backup.size_mb }} MB)</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="restore-confirm" style="font-size:11px; font-weight:600;">Type Confirmation</label>
+              <input type="text" id="restore-confirm" name="confirmation" placeholder="restore-BACKUP_FILENAME" required style="width:100%; padding:6px; border:1px solid #ffcccc; border-radius:4px; font-size:11px;">
+              <div class="help-text" style="margin-top:4px; font-size:10px; color:#c00;">To confirm, type exactly: restore-FILENAME (replace FILENAME with the selected backup)</div>
+            </div>
+            <button type="submit" class="btn" style="align-self:flex-start; background:#c00; color:white; border:none; padding:6px 12px; border-radius:4px; font-size:11px;">Restore from Backup</button>
+          </form>
+        </div>
+      </details>
     </div>
     {% else %}
     <div style="margin-top:16px; padding:12px; background:var(--row-alt); border-radius:6px; color:var(--muted); font-size:12px;">

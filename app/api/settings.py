@@ -142,3 +142,71 @@ async def change_password(request: Request):
         name="settings.html",
         context={"settings": store.list_settings(), "message": "✓ Password changed successfully"},
     )
+
+
+@router.post("/settings/restore-backup")
+async def restore_backup(request: Request):
+    """Restore data from a backup zip.
+
+    DESTRUCTIVE OPERATION — requires explicit typed confirmation.
+    NOTE: This endpoint is marked for human review before enabling in production.
+    """
+    from fcmr_core.backup import restore_backup
+
+    form = await request.form()
+    backup_filename = form.get("backup_filename", "").strip()
+    confirmation = form.get("confirmation", "").strip()
+
+    # Verify confirmation matches expected format: "restore-<filename>"
+    expected_confirmation = f"restore-{backup_filename}"
+    if confirmation != expected_confirmation:
+        return templates.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context={
+                "settings": store.list_settings(),
+                "backups": list_backups(),
+                "message": "✗ Confirmation mismatch. Restore cancelled.",
+            },
+            status_code=400,
+        )
+
+    # Locate backup file
+    from fcmr_core.config import settings
+
+    backup_path = settings.backups_dir / backup_filename
+    if not backup_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context={
+                "settings": store.list_settings(),
+                "backups": list_backups(),
+                "message": f"✗ Backup file not found: {backup_filename}",
+            },
+            status_code=404,
+        )
+
+    # Perform restore
+    try:
+        restore_backup(backup_path)
+        return templates.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context={
+                "settings": store.list_settings(),
+                "backups": list_backups(),
+                "message": "✓ Backup restored successfully. Please refresh your browser.",
+            },
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="settings.html",
+            context={
+                "settings": store.list_settings(),
+                "backups": list_backups(),
+                "message": f"✗ Restore failed: {exc}",
+            },
+            status_code=500,
+        )
