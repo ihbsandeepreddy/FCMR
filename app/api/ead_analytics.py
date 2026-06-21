@@ -176,6 +176,7 @@ async def ead_run_detail(request: Request, run_id: str):
 
         # Summary stats from merged DataFrame (re-build for stat cards)
         ead_summaries = {}
+        ead_unavailable = []  # Collect unavailable summaries (missing data)
         try:
             engagement_id = run.get("engagement_id") or request.session.get("engagement_id")
             df_all = _build_ead_df(engagement_id)
@@ -194,20 +195,22 @@ async def ead_run_detail(request: Request, run_id: str):
                     ("Data Quality Summary", generate_data_quality_summary_ead(df_all)),
                 ]
                 for title, summary_df in summaries:
-                    if (
-                        summary_df
-                        and not summary_df.is_empty()
-                        and "note" not in summary_df.columns
-                    ):
-                        ead_summaries[title] = {
-                            "title": title,
-                            "data": summary_df.to_dicts(),
-                            "columns": summary_df.columns,
-                        }
+                    if summary_df and not summary_df.is_empty():
+                        if "note" in summary_df.columns:
+                            ead_unavailable.append(
+                                {"title": title, "reason": summary_df[0, "note"]}
+                            )
+                        else:
+                            ead_summaries[title] = {
+                                "title": title,
+                                "data": summary_df.to_dicts(),
+                                "columns": summary_df.columns,
+                            }
         except Exception:
             context["summary"] = {}
 
         context["ead_summaries"] = ead_summaries
+        context["ead_unavailable"] = ead_unavailable
 
         context["workpaper_available"] = (output_dir / "ead_workpaper.xlsx").exists()
 
