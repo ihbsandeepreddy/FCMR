@@ -238,6 +238,16 @@ async def upload_progress(request: Request, job_id: str):
     return JSONResponse(job)
 
 
+@router.get("/upload-wait/{job_id}", response_class=HTMLResponse)
+async def upload_wait(request: Request, job_id: str):
+    """Server-rendered progress page for native form-submit uploads."""
+    return templates.TemplateResponse(
+        request=request,
+        name="upload_wait.html",
+        context={"job_id": job_id},
+    )
+
+
 @router.post("/upload")
 async def do_upload(
     request: Request,
@@ -303,6 +313,11 @@ async def do_upload(
             daemon=True,
         ).start()
 
+        # Native browser form submit (Accept: text/html) → redirect to a waiting page.
+        # XHR requests send Accept: */* — return JSON so JS can poll.
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept and "application/json" not in accept:
+            return RedirectResponse(url=f"/dashboard/upload-wait/{job_id}", status_code=303)
         return JSONResponse({"job_id": job_id})
 
     finally:
