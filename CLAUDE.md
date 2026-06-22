@@ -6,16 +6,18 @@
 > When code and this document disagree, treat it as a bug in one of them and reconcile
 > immediately (update the code or update this doc in the same change).
 >
-> **Last reconciled with code:** 2026-06-22 (v0.1.39 forensic analytics + UI polish — see below).
+> **Last reconciled with code:** 2026-06-22 (v0.1.40 workpaper simplification + sampling tests — see below).
 > Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
 >
-> **v0.1.39 (this pass):** added 7 catalogue-grounded forensic analytics (CM-DQ-06/07/09/10,
+> **v0.1.40 (this pass):** removed redundant "Detailed Exceptions" sheet from workpaper (data 
+> available in wide CSV); enhanced TOC and TOD sheet to show actual loan data (customer_id, 
+> full_name, lan) alongside control audit fields for auditor review; verified and documented
+> sampling test coverage (3 tests lock reproducibility invariant). Workbook now 4 core sheets:
+> Cover, Lead Sheet, TOC and TOD (with loan details), Methodology. All 244 tests pass.
+>
+> **v0.1.39:** added 7 catalogue-grounded forensic analytics (CM-DQ-06/07/09/10,
 > CM-ID-01/03/04) with pre-run selection UI styled as a category; fixed empty Detailed 
-> Exceptions sheet in workpaper (now shows "no exceptions found" if all records pass);
-> added optional CM schema columns (income, branch_code, dsa_code, onboarding_date) to enable
-> column-dependent analytics; wired forensic analytics through full pipeline (context → template
-> → form → store → filtering → results); added 21 tests for forensic analytics (coverage for
-> both detection and NOT_RUN paths). All 244 tests pass.
+> Exceptions sheet; added optional CM schema columns (income, branch_code, dsa_code, onboarding_date).
 >
 > **v0.1.38 hardening:** fixed UCID-vs-duplicate ordering (same-UCID/distinct-LAN
 > scoping now works); run-detail no longer 500s on non-completed runs; Aadhaar masked in the
