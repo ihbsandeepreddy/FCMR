@@ -31,9 +31,11 @@ def _job_set(job_id: str, pct: int, label: str, status: str = "running", redirec
     job = _upload_jobs.get(job_id)
     if job is None:
         return
-    job.update({"pct": pct, "label": label, "status": status})
+    # Build update dict atomically so polls never see status="done" with redirect=None
+    update: dict = {"pct": pct, "label": label, "status": status}
     if redirect is not None:
-        job["redirect"] = redirect
+        update["redirect"] = redirect
+    job.update(update)
 
 
 def _now() -> str:
