@@ -43,37 +43,31 @@ def generate_synthetic_loan_master(n_rows: int = 10_000_000) -> pl.DataFrame:
 
 
 def detect_and_flag_exceptions(df: pl.DataFrame) -> pl.DataFrame:
-    """Detect data quality / business rule exceptions."""
-    # Flag invalid amounts
-    has_amount_issue = (
-        (df["SANCTIONED_AMT"].is_null()) |
-        (df["SANCTIONED_AMT"] <= 0) |
-        (df["OUTSTANDING_AMT"] > df["SANCTIONED_AMT"])
-    )
+    """Detect exceptions and assign to specific classes (max 1 primary class per row)."""
+    exception_classes = []
 
-    # Flag invalid rates/tenure
-    has_rate_issue = (df["INTEREST_RATE"] <= 0) | (df["INTEREST_RATE"] > 25)
-    has_tenure_issue = df["TENURE_MONTHS"] <= 0
+    for row in df.iter_rows(named=True):
+        exc_class = None
 
-    # Flag date issues
-    has_kyc_issue = df["KYC_STATUS"].is_in(["Missing", "Expired", "Pending"])
+        # Check in priority order (first match wins)
+        if (row["SANCTIONED_AMT"] is None or row["SANCTIONED_AMT"] <= 0):
+            exc_class = "INVALID_SANCTIONED_AMT"
+        elif row["OUTSTANDING_AMT"] and row["SANCTIONED_AMT"] and row["OUTSTANDING_AMT"] > row["SANCTIONED_AMT"]:
+            exc_class = "OUTSTANDING_EXCEEDS_SANCTIONED"
+        elif row["INTEREST_RATE"] is None or row["INTEREST_RATE"] <= 0 or row["INTEREST_RATE"] > 25:
+            exc_class = "INVALID_INTEREST_RATE"
+        elif row["TENURE_MONTHS"] is None or row["TENURE_MONTHS"] <= 0:
+            exc_class = "INVALID_TENURE"
+        elif row["KYC_STATUS"] in ["Missing", "Expired", "Pending"]:
+            exc_class = "KYC_ISSUE"
+        elif (row["LOAN_STATUS"] == "Closed") and (row["OUTSTANDING_AMT"] and row["OUTSTANDING_AMT"] > 0):
+            exc_class = "CLOSED_WITH_OUTSTANDING"
+        elif (row["LOAN_STATUS"] in ["Written-off", "NPA"]) and (row["DPD"] == 0):
+            exc_class = "STATUS_DPD_MISMATCH"
 
-    # Flag status mismatches
-    has_status_issue = (
-        (df["LOAN_STATUS"] == "Closed") & (df["OUTSTANDING_AMT"] > 0)
-    ) | (
-        (df["LOAN_STATUS"].is_in(["Written-off", "NPA"])) & (df["DPD"] == 0)
-    )
+        exception_classes.append(exc_class if exc_class else "CLEAN")
 
-    # Combine: any issue = exception
-    has_exception = (
-        has_amount_issue | has_rate_issue | has_tenure_issue |
-        has_kyc_issue | has_status_issue
-    )
-
-    return df.with_columns(
-        pl.when(has_exception).then(1).otherwise(0).alias("IS_EXCEPTION")
-    )
+    return df.with_columns(pl.Series("EXCEPTION_CLASS", exception_classes).cast(pl.Utf8))
 
 
 def compute_recency_weight(df: pl.DataFrame) -> pl.DataFrame:
@@ -95,7 +89,7 @@ def compute_recency_weight(df: pl.DataFrame) -> pl.DataFrame:
 
 
 def run_audit_sampling(df: pl.DataFrame) -> tuple[pl.DataFrame, dict]:
-    """Audit sampling: exceptions + strata + random."""
+    """Audit sampling: exceptions (per-class) + strata + random."""
     n_pop = len(df)
 
     # Exception detection
@@ -103,21 +97,48 @@ def run_audit_sampling(df: pl.DataFrame) -> tuple[pl.DataFrame, dict]:
     df = compute_recency_weight(df)
 
     # Split
-    df_exc = df.filter(pl.col("IS_EXCEPTION") == 1).sort("RECENCY_WEIGHT", descending=True)
-    df_clean = df.filter(pl.col("IS_EXCEPTION") == 0)
+    df_exc = df.filter(pl.col("EXCEPTION_CLASS") != "CLEAN")
+    df_clean = df.filter(pl.col("EXCEPTION_CLASS") == "CLEAN")
 
     n_exceptions = len(df_exc)
     n_clean = len(df_clean)
 
-    # Sample exceptions (max 10% of exceptions total, capped at 10 per class conceptually, but just take top recent)
-    sample_exc = df_exc.head(max(10, min(100, n_exceptions // 10)))
+    # **Phase 1: Exception Sampling (max 10 per class, newest first)**
+    sample_exc_list = []
+    exception_classes = df_exc["EXCEPTION_CLASS"].unique().to_list()
 
-    # Strata coverage
-    strata = df_clean.group_by(["PRODUCT", "LOAN_STATUS", "BRANCH"]).head(1)
+    for exc_class in exception_classes:
+        class_rows = df_exc.filter(pl.col("EXCEPTION_CLASS") == exc_class).sort("RECENCY_WEIGHT", descending=True)
+        top_10 = class_rows.head(MAX_PER_EXCEPTION)
+        sample_exc_list.append(top_10)
+
+    sample_exc = pl.concat(sample_exc_list) if sample_exc_list else pl.DataFrame()
+
+    # **Phase 2: Strata Coverage (1+ row per Product x Status x Branch)**
+    strata_list = []
+    strata_groups = df_clean.group_by(["PRODUCT", "LOAN_STATUS", "BRANCH"]).agg(pl.col("*").first())
+
+    for row_dict in strata_groups.to_dicts():
+        # Find any row matching this stratum
+        stratum_row = df_clean.filter(
+            (pl.col("PRODUCT") == row_dict["PRODUCT"]) &
+            (pl.col("LOAN_STATUS") == row_dict["LOAN_STATUS"]) &
+            (pl.col("BRANCH") == row_dict["BRANCH"])
+        ).sort("RECENCY_WEIGHT", descending=True).head(1)
+        if stratum_row.height > 0:
+            strata_list.append(stratum_row)
+
+    strata = pl.concat(strata_list) if strata_list else pl.DataFrame()
     n_strata = len(strata)
 
-    # Random from remaining clean
-    remaining_clean = df_clean.filter(~df_clean["ROW_ID"].is_in(strata["ROW_ID"]))
+    # **Phase 3: Random Fill (from remaining clean, weighted by recency)**
+    used_row_ids = set()
+    if sample_exc.height > 0:
+        used_row_ids.update(sample_exc["ROW_ID"].to_list())
+    if strata.height > 0:
+        used_row_ids.update(strata["ROW_ID"].to_list())
+
+    remaining_clean = df_clean.filter(~df_clean["ROW_ID"].is_in(list(used_row_ids)))
     target_random = max(int(n_clean * TARGET_PCT), TARGET_MIN) - n_strata
     target_random = max(0, target_random)
 
@@ -125,20 +146,21 @@ def run_audit_sampling(df: pl.DataFrame) -> tuple[pl.DataFrame, dict]:
         random.seed(SEED)
         weights = remaining_clean["RECENCY_WEIGHT"].to_list()
         total_w = sum(weights)
-        probs = [w / total_w for w in weights]
+        probs = [w / total_w for w in weights] if total_w > 0 else [1.0 / len(weights)] * len(weights)
         indices = random.choices(range(len(remaining_clean)), weights=probs, k=min(target_random, len(remaining_clean)))
         sample_random = remaining_clean[indices]
     else:
         sample_random = pl.DataFrame()
 
-    # Combine
-    samples = [s for s in [sample_exc, strata, sample_random] if len(s) > 0]
+    # Combine all samples
+    samples = [s for s in [sample_exc, strata, sample_random] if s.height > 0]
     selected = pl.concat(samples, how="diagonal_relaxed") if samples else pl.DataFrame()
 
     summary = {
         "population_total": n_pop,
         "clean_records": n_clean,
         "exception_records": n_exceptions,
+        "exception_classes_found": len(exception_classes),
         "exceptions_sampled": len(sample_exc),
         "strata_coverage_sampled": n_strata,
         "random_sampled": len(sample_random),
