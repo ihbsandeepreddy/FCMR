@@ -6,17 +6,24 @@
 > When code and this document disagree, treat it as a bug in one of them and reconcile
 > immediately (update the code or update this doc in the same change).
 >
-> **Last reconciled with code:** 2026-06-21 (v0.1.38 production-hardening pass — see below).
+> **Last reconciled with code:** 2026-06-22 (v0.1.39 forensic analytics + UI polish — see below).
 > Supersedes the old phase-spec `CLAUDE.md` and the marketing-style `README.md`.
 >
-> **v0.1.38 hardening (this pass):** fixed UCID-vs-duplicate ordering (same-UCID/distinct-LAN
+> **v0.1.39 (this pass):** added 7 catalogue-grounded forensic analytics (CM-DQ-06/07/09/10,
+> CM-ID-01/03/04) with pre-run selection UI styled as a category; fixed empty Detailed 
+> Exceptions sheet in workpaper (now shows "no exceptions found" if all records pass);
+> added optional CM schema columns (income, branch_code, dsa_code, onboarding_date) to enable
+> column-dependent analytics; wired forensic analytics through full pipeline (context → template
+> → form → store → filtering → results); added 21 tests for forensic analytics (coverage for
+> both detection and NOT_RUN paths). All 244 tests pass.
+>
+> **v0.1.38 hardening:** fixed UCID-vs-duplicate ordering (same-UCID/distinct-LAN
 > scoping now works); run-detail no longer 500s on non-completed runs; Aadhaar masked in the
 > wide CSV; deterministic beneficiary keys; calendar-correct age; per-engagement disabled-rules
 > wired end-to-end; EAD summary reports + EAD workpaper build restored; login inline errors;
 > column-map/empty-CSV validation; persisted upload errors; engagement guards; `FCMR_DATA_DIR`
 > honored; `tests/test_imports.py` now exists; suite expanded (golden/EAD-baseline/web-e2e/
-> robustness/sampling). Remaining roadmap (performance for 10M rows, bolder UI refresh, the
-> two-engine audit-deliverable upgrade) is tracked in `HANDOFF.md`.
+> robustness/sampling).
 
 ---
 
