@@ -204,28 +204,22 @@ def build_workpaper(
         border,
     )
 
-    # ── Sheet 2: Detailed Exceptions ──
-    ws2 = wb.create_sheet("Detailed Exceptions")
-    _build_detailed_exceptions_sheet(
-        ws2, wide_csv_path, header_fill, header_font, border, max_rows=50000
-    )
+    # ── Sheet 2: TOC and TOD ──
+    ws2 = wb.create_sheet("TOC and TOD")
+    _build_toc_tod_sheet(ws2, sample_records, header_fill, header_font, border, wide_csv_path)
 
-    # ── Sheet 3: TOC and TOD ──
-    ws3 = wb.create_sheet("TOC and TOD")
-    _build_toc_tod_sheet(ws3, sample_records, header_fill, header_font, border)
-
-    # ── Sheet 4: Methodology ──
-    ws4 = wb.create_sheet("Methodology")
+    # ── Sheet 3: Methodology ──
+    ws3 = wb.create_sheet("Methodology")
     _build_methodology_sheet(
-        ws4, engagement, run, wide_csv_path, sample_records, title_font, subheader_font
+        ws3, engagement, run, wide_csv_path, sample_records, title_font, subheader_font
     )
 
-    # ── Sheet 5: Data Quality ──
-    ws5 = wb.create_sheet("Data Quality")
-    _build_data_quality_sheet(ws5, wide_csv_path, header_fill, header_font, border)
+    # ── Sheet 4: Data Quality ──
+    ws4 = wb.create_sheet("Data Quality")
+    _build_data_quality_sheet(ws4, wide_csv_path, header_fill, header_font, border)
 
-    # ── Sheets 6-13: CM Summary Reports (if customer_master) ──
-    # ── Sheets 14-17: B4 Best-Practice Analytics (if customer_master) ──
+    # ── Sheets 5-12: CM Summary Reports (if customer_master) ──
+    # ── Sheets 13-16: B4 Best-Practice Analytics (if customer_master) ──
     if upload and upload.get("report_type") == "customer_master":
         try:
             df = store.get_upload_df(upload["upload_id"])
@@ -669,11 +663,12 @@ def _build_detailed_exceptions_sheet(
 
 
 def _build_toc_tod_sheet(
-    ws, sample_records, header_fill, header_font, border, max_rows: int = 5000
+    ws, sample_records, header_fill, header_font, border, wide_csv_path=None, max_rows: int = 5000
 ):
-    """Build Test of Controls / Test of Details sheet with ICFR attributes.
+    """Build Test of Controls / Test of Details sheet with loan data + ICFR attributes.
 
     Args:
+        wide_csv_path: Path to wide CSV for enriching samples with customer/loan details
         max_rows: Maximum sample rows to write (default 5,000); prevents OOM on very large samples.
     """
     # Cap sample records for scale safety
@@ -713,9 +708,24 @@ def _build_toc_tod_sheet(
         else:
             return "Data format & completeness"
 
-    # Headers
+    # Load wide CSV for enrichment if available
+    enrichment_data = {}
+    if wide_csv_path:
+        try:
+            wide_df = pl.read_csv(wide_csv_path, infer_schema_length=0)
+            for row in wide_df.iter_rows(named=True):
+                row_num = row.get("_row_num")
+                if row_num is not None:
+                    enrichment_data[int(row_num)] = row
+        except Exception:
+            pass
+
+    # Headers: loan data first, then audit fields
     headers = [
         "Sample#",
+        "Customer_ID",
+        "Full_Name",
+        "LAN",
         "Row_Index",
         "Criticality",
         "Selection_Reason",
@@ -738,19 +748,25 @@ def _build_toc_tod_sheet(
 
     # Sample rows
     for sample_idx, sample in enumerate(sample_records, 2):
+        row_index = sample.get("row_index")
+        enriched = enrichment_data.get(row_index, {})
+
         ws[f"A{sample_idx}"] = sample_idx - 1
-        ws[f"B{sample_idx}"] = sample["row_index"]
-        ws[f"C{sample_idx}"] = sample["criticality"]
-        ws[f"D{sample_idx}"] = sample["selection_reason"]
-        ws[f"E{sample_idx}"] = get_control_objective(sample["criticality"])
-        ws[f"F{sample_idx}"] = get_assertion(sample.get("exception_codes", ""))
-        ws[f"G{sample_idx}"] = get_attribute_tested(
+        ws[f"B{sample_idx}"] = enriched.get("customer_id", "")
+        ws[f"C{sample_idx}"] = enriched.get("full_name", "")
+        ws[f"D{sample_idx}"] = enriched.get("lan", "")
+        ws[f"E{sample_idx}"] = row_index
+        ws[f"F{sample_idx}"] = sample["criticality"]
+        ws[f"G{sample_idx}"] = sample["selection_reason"]
+        ws[f"H{sample_idx}"] = get_control_objective(sample["criticality"])
+        ws[f"I{sample_idx}"] = get_assertion(sample.get("exception_codes", ""))
+        ws[f"J{sample_idx}"] = get_attribute_tested(
             sample["criticality"], sample.get("exception_codes", "")
         )
-        # H, I, J left blank for tester sign-off
+        # K, L, M, N left blank for tester sign-off
 
     # Adjust column widths
-    for col_idx, width in enumerate([8, 10, 12, 28, 28, 14, 22, 15, 12, 12, 16], 1):
+    for col_idx, width in enumerate([8, 14, 20, 14, 10, 12, 28, 28, 14, 22, 15, 12, 12, 16], 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = width
 
     # Add truncation note if needed

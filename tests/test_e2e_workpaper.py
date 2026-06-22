@@ -168,12 +168,11 @@ def test_full_pipeline():
         wb = load_workbook(workpaper_path)
         sheet_names = wb.sheetnames
         print(f"  Sheets: {sheet_names}")
-        # The workbook must contain the five core audit sheets (in this order);
+        # The workbook must contain the four core audit sheets (in this order);
         # additional sheets (e.g. "Data Quality", summaries) may follow.
         core_sheets = [
             "Cover",
             "Lead Sheet",
-            "Detailed Exceptions",
             "TOC and TOD",
             "Methodology",
         ]
@@ -193,20 +192,6 @@ def test_full_pipeline():
         assert ws_lead.max_row > 5, "Lead Sheet is empty"
         lead_text = " ".join(str(c.value) for row in ws_lead.iter_rows() for c in row if c.value)
         assert "Procedures Performed" in lead_text, "Lead Sheet missing Procedures Performed"
-
-        # Check Detailed Exceptions sheet. NOTE: this sheet is being redesigned to a
-        # "one row per exception item" layout (plan item 4); for now we only assert it
-        # has a header (+ any rows) and that masking holds — not the old wide-form count.
-        ws_exc = wb["Detailed Exceptions"]
-        print(f"  Detailed Exceptions: {ws_exc.max_row} rows")
-        assert ws_exc.max_row >= 1, "Detailed Exceptions sheet missing"
-        # Aadhaar masking (invariant #2): no raw 12-digit Aadhaar must appear
-        import re as _re
-
-        exc_text = " ".join(str(c.value) for row in ws_exc.iter_rows() for c in row if c.value)
-        assert not _re.search(
-            r"\b\d{12}\b", exc_text
-        ), "Raw 12-digit Aadhaar leaked into Detailed Exceptions"
 
         # Check TOC and TOD (was "TOC/TOD", now fixed)
         ws_toc = wb["TOC and TOD"]
